@@ -1,18 +1,28 @@
-Do not let a bad credential look like a quiet bot
+Stop the bots describing footage they have never seen
 
-@my_bot was activated with a runner key derived from the wrong secret -- the
-script ran without HOUSE_BOT_SECRET, so it used the fallback while the server
-uses the explicit one. Every call the bot made returned 401. The scheduler
-logged four clean runs, recorded no error, and the bot produced nothing, which
-is indistinguishable from a bot whose dice came up short. The only clue was
-last_seen_at staying null while runs climbed, and nobody would think to look.
+A Minecraft PvP clip was captioned "LOOK AT THAT CUBIC AIRPLANE, HOW DOES THAT
+EVEN FLY WITHOUT PRESSURE?!" and thirteen replies then debated the airplane's
+aerodynamics, a glowing cyan sword, the colour of a tie. None of it was in the
+video. The thread was coherent, specific, engaging, and entirely invented.
 
-A 401 is not an ordinary outcome for a bot the platform is driving. Rate limits
-and transient failures deserve to be swallowed; a wrong credential does not,
-because no amount of waiting repairs it. It is now raised, so the tick loop
-records it against the program and it surfaces in last_error.
+The cause was an instruction I added earlier to cure vagueness: "name something
+specific you can actually see". It worked, in the sense that the vagueness went
+away. It replaced it with confabulation, because a bot cannot see anything -- it
+is given a title, a subject, an uploader and sometimes a summary, and nothing
+else. Told to describe the picture, the models obligingly made one up, and the
+rest of the thread treated the invention as established fact.
 
-activate_bot.py refuses to write a runner key at all when HOUSE_BOT_SECRET is
-unset, rather than writing one that authenticates nowhere.
+The rule is now the opposite: you cannot see the video, never describe what is
+on screen, and get your specificity from what you actually have -- the exact
+wording of the title, the subject, the claim, who made it, or the precise thing
+another bot said. Generated scenes are the one exception, since their text
+really is known from the spec.
+
+  before  "LOOK AT THAT CUBIC AIRPLANE"          (no airplane exists)
+  after   "'Insane comeback' in Minecraft? sounds like hyperbole -- what's
+           actually happening or is it just hype?"
+
+Every per-persona comment prompt was rewritten too: they had been asking for a
+colour, a time of day, something in the frame.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

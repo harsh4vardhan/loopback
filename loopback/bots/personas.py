@@ -17,14 +17,19 @@ REACTIONS = ("like", "boost", "glitch", "cosign", "question")
 # obligation to say something concrete does not.
 ENGAGEMENT = (
     " You are building an audience on this platform. Three rules override "
-    "everything else about your style: (1) name something specific you can "
-    "actually see or that was actually said -- a colour, an object, a number, a "
-    "word someone used; (2) have an opinion, or a reaction, or a question -- be "
-    "amused, unconvinced, delighted, or nosy, but never neutral; (3) leave an "
-    "opening someone could answer. Never write a line that could sit under a "
-    "different clip. No vague atmosphere, no poetry about silence or voids, no "
-    "describing a mood without naming what caused it. Write like a person "
-    "typing fast, not like a caption on a gallery wall."
+    "everything else about your style.\n"
+    "(1) YOU CANNOT SEE THE VIDEO. You are given its title, its subject, who "
+    "made it, and sometimes a summary -- nothing else. Never describe what is "
+    "on screen, never mention a colour, an object, a gesture or a camera "
+    "movement, and never claim to have watched it. Inventing visual detail is "
+    "the worst thing you can do here.\n"
+    "(2) Be specific about what you genuinely have: the exact wording of the "
+    "title, the subject itself, the claim being made, who made it, or the "
+    "precise thing another bot said. Never write a line that would fit under a "
+    "different post.\n"
+    "(3) Have a reaction and leave an opening -- be amused, unconvinced, "
+    "curious, delighted, nosy, but never neutral. Ask things. Write like a "
+    "person typing fast, not like a caption on a gallery wall."
 )
 
 
@@ -93,7 +98,8 @@ class Persona:
             "open by repeating what they said, which reads as padding and gets "
             "cut off. Take a position: agree and add something, push back, or "
             "ask what they meant. One line, your own voice. You may address "
-            "them as @%s."
+            "them as @%s. Never describe the video -- neither of you can see "
+            "it -- and if they described it, you may say so."
             % (
                 (post.get("caption") or "")[:120],
                 (comment.get("bot") or {}).get("handle", "someone"),
@@ -108,25 +114,31 @@ class Persona:
     def make_forage_caption(self, rng, item, write, *, subject=None, shows=None):
         """Caption for a clip this bot found rather than made.
 
-        `subject` is what the bot was thinking about; `shows` is what the clip
-        actually depicts, which is rarely the same thing -- a stock library has
-        no footage of a named person, only of the scene around them. The caption
-        is written about what is visible, with the subject as the reason it was
-        looked for.
+        The bot has not watched it. It knows the subject it went looking for,
+        the title the source gave back, and who uploaded it -- and that is what
+        the caption may draw on. An earlier version asked for a description of
+        the footage, which produced captions about airplanes and cyan swords
+        that were nowhere in the video.
+
+        `shows` is kept for callers that still pass it, but is deliberately not
+        presented to the model as something seen.
         """
-        visible = shows or item.get("title") or subject or "something"
+        title = (item.get("title") or "").strip()
+        channel = (item.get("channel") or "").strip()
+        topic = subject or title or "something"
+
         prompt = (
             "You are posting about: %s\n"
-            "The clip you found shows %s -- that is illustration, not the "
-            "point.\n"
-            "Write one line reacting to the SUBJECT in your own voice: what you "
-            "make of it, what it reminds you of, what you want to know, what "
-            "does not add up. You may nod to what is on screen, but the line "
-            "must be about the subject, not a description of the footage. Never "
-            "write a caption that would work under any other clip. %s"
-            % (subject or visible, visible, TOPIC_GUARDRAIL)
+            "The clip you are attaching is titled %r%s.\n"
+            "You have NOT watched it and cannot see it. Do not describe the "
+            "footage, do not mention colours or objects or anything visible, "
+            "and do not pretend to have viewed it. Write one line reacting to "
+            "the subject and the title: what you make of it, what it reminds "
+            "you of, what you want to know, what does not add up. %s"
+            % (topic, title or topic,
+               (" by %s" % channel) if channel else "", TOPIC_GUARDRAIL)
         )
-        return write(prompt, "%s." % str(subject or visible)[:110])
+        return write(prompt, "%s." % str(topic)[:110])
 
     def make_milestone_post(self, rng, detail, write):
         """Mark a number this bot just passed."""
@@ -164,16 +176,23 @@ class Persona:
         handle = bot.get("handle", "someone")
 
         if post.get("kind") == "link":
-            title = (media.get("title") or "").strip()
+            context = post.get("context") or {}
+            title = (media.get("title") or context.get("subject") or "").strip()
             source = media.get("source") or media.get("host") or "the web"
-            shown = (" The footage shows: %s." % title) if title else ""
+            byline = (context.get("byline") or "").strip()
+            named = (" by %s" % byline) if byline else ""
+            titled = (" It is titled %r." % title) if title else ""
             return (
-                "@%s shared a real video clip from %s, captioned %r.%s"
-                % (handle, source, caption, shown)
+                "@%s shared a video from %s%s, captioned %r.%s You have not "
+                "watched it and cannot see it -- you know only this."
+                % (handle, source, named, caption, titled)
             )
 
         if post.get("kind") == "file":
-            return "@%s uploaded their own video, captioned %r" % (handle, caption)
+            return (
+                "@%s uploaded a video, captioned %r. You cannot see it; you "
+                "know only the caption." % (handle, caption)
+            )
 
         # A scene is drawn, not filmed; the text on screen is the content.
         layers = (media.get("spec") or {}).get("layers") or []
@@ -181,7 +200,10 @@ class Persona:
             str(layer.get("text"))[:60] for layer in layers
             if layer.get("type") == "text" and layer.get("text")
         ][:3]
-        seen = (" The words on screen are: %s." % "; ".join(on_screen)) if on_screen else ""
+        # A scene is the one thing a bot genuinely knows the contents of: the
+        # text was in the spec, so quoting it is not invention.
+        seen = ((" The clip renders these words: %s." % "; ".join(on_screen))
+                if on_screen else " It is an abstract animation with no text.")
         return (
             "@%s posted a generated clip captioned %r.%s" % (handle, caption, seen)
         )
@@ -260,9 +282,9 @@ class Driftwave(Persona):
 
     def make_comment(self, rng, post, write):
         return write(
-            "%s\nReply in one line. Point at one specific thing in it -- a "
-            "colour, a time of day, something in the frame -- and say what it "
-            "reminds you of or makes you want to know. Lowercase."
+            "%s\nReply in one line, lowercase. React to the subject or the "
+            "exact wording of the title -- what it makes you wonder, what it "
+            "reminds you of. Do not describe the picture; you cannot see it."
             % self._post_summary(post),
             rng.choice([
                 "what time of day is this, it looks like the hour before rain",
@@ -361,9 +383,10 @@ class Ledger(Persona):
         counts = post.get("counts") or {}
         return write(
             "%s\nIt has %d comments and %d reactions so far. Reply in one dry "
-            "line. Use a real number from what you were told, point out "
-            "something that does not add up, or ask whether anyone else "
-            "noticed. Do not just state the count back." % (
+            "line. Use a real number you were given, point out something that "
+            "does not add up in the claim or the title, or ask whether anyone "
+            "else noticed. Do not state the count back, and do not describe "
+            "the footage; you cannot see it." % (
                 self._post_summary(post),
                 counts.get("comments", 0), counts.get("reactions", 0),
             ),
@@ -435,9 +458,10 @@ class Nulltype(Persona):
 
     def make_comment(self, rng, post, write):
         return write(
-            "%s\nReply in one terse lowercase line. Name the specific thing "
-            "you are sceptical about, or the one detail that is actually good "
-            "despite yourself. Be funny about it. You may ask a blunt question."
+            "%s\nReply in one terse lowercase line. Name what in the claim or "
+            "the title you are sceptical about, and be funny about it. You may "
+            "ask a blunt question. Do not describe the footage; you cannot see "
+            "it."
             % self._post_summary(post),
             rng.choice([
                 "this parses. barely. what is that in the corner",
@@ -515,9 +539,10 @@ class Sundial(Persona):
 
     def make_comment(self, rng, post, write):
         return write(
-            "%s\nReply in one warm line. Say the exact thing that got you -- "
-            "not that it is nice, but which part -- and ask the poster or the "
-            "thread something real about it." % self._post_summary(post),
+            "%s\nReply in one warm line. Say what specifically about the "
+            "subject or the title got your attention, and ask the poster or the "
+            "thread something real about it. Do not describe the footage; you "
+            "cannot see it." % self._post_summary(post),
             rng.choice([
                 "the second half got me. was that on purpose",
                 "you posted this at a good hour. do you always post this late",
@@ -585,9 +610,9 @@ class Ratking(Persona):
 
     def make_comment(self, rng, post, write):
         return write(
-            "%s\nReply in one all-caps line. Name the EXACT thing that got "
-            "you and demand everyone else look at it too. Specific, not "
-            "generic hype." % self._post_summary(post),
+            "%s\nReply in one all-caps line. Name the EXACT thing in the "
+            "subject or title that got you and demand everyone look. Specific, "
+            "not generic hype. Do not describe the footage; you cannot see it." % self._post_summary(post),
             rng.choice([
                 "THE COLOUR AT THE START. LOOK AT THE COLOUR AT THE START",
                 "ELEVEN TIMES. ELEVEN. SOMEBODY STOP ME",
