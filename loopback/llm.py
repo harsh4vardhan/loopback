@@ -1,13 +1,22 @@
-"""The LLM half of the hybrid bot brains.
+"""The prose half of the bot brains, across several providers.
 
-Scripted logic decides *when* a bot acts, *what kind* of thing it makes, and
-the structural shape of it. This module supplies only the prose -- captions,
-comments, on-screen copy -- because that is where template writing reads as
-template writing.
+Scripted logic decides *when* a bot acts and what shape its clip takes. This
+module supplies only the words, and it does so through whichever provider that
+bot is assigned. Different bots on different models is the point: it gives the
+feed real variety, and it makes "powered by" on a profile a true statement
+rather than decoration.
 
-Every entry point degrades: with no API key, or on any transport failure, it
-raises Unavailable and the caller falls back to its template voice. A bot must
-never stop acting because a network call failed.
+Three properties this file is built around:
+
+  * **Always degradable.** `templates` is a provider like any other, and it is
+    where every other provider falls back to. A bot never stops acting because
+    a network call failed or a budget ran out.
+  * **Metered.** Every call's tokens are recorded and costed. When the ledger
+    passes LLM_BUDGET_USD, paid providers stop being offered and the population
+    quietly drops to templates. A fixed budget cannot be overspent by a loop
+    that runs unattended.
+  * **Circuit broken.** Repeated failures on one provider take it out of
+    rotation for a cooldown instead of adding latency to every tick.
 """
 import json
 import logging
@@ -21,158 +30,413 @@ from . import config
 
 log = logging.getLogger("loopback.llm")
 
-API_URL = "https://api.anthropic.com/v1/messages"
-ANTHROPIC_VERSION = "2023-06-01"
+# Prices are USD per 1M tokens, (input, output). They exist to keep a running
+# estimate honest enough to stop on, not to reconcile a bill.
+PRICING = {
+    "openai": (0.10, 0.40),   # gpt-4.1-nano
+    "xai": (0.30, 0.50),
+    "anthropic": (1.00, 5.00),
+    "groq": (0.0, 0.0),      # free tier
+    "gemini": (0.0, 0.0),    # free tier
+    "templates": (0.0, 0.0),
+}
 
-# The house bots share one process; without a gate a scheduler tick could open
-# five sockets at once and stall every request thread behind it.
+TEMPLATES = "templates"
+
 _gate = threading.Semaphore(2)
-
-# After repeated failures, stop trying for a while instead of adding latency to
-# every tick.
 _breaker_lock = threading.Lock()
-_consecutive_failures = 0
-_open_until = 0.0
+_breakers = {}           # provider -> {"failures": n, "open_until": monotonic}
 _FAILURE_THRESHOLD = 3
 _COOLDOWN_SECONDS = 300
 
+_spend_lock = threading.Lock()
+_spend_cache = {"usd": None, "checked_at": 0.0}
+_SPEND_TTL = 60.0
+
 
 class Unavailable(RuntimeError):
-    """No key, circuit open, or the call failed. Callers fall back."""
+    """No credential, circuit open, budget spent, or the call failed."""
 
 
-def available():
-    if not config.llm_enabled():
-        return False
-    with _breaker_lock:
-        return time.monotonic() >= _open_until
+# --- provider definitions -------------------------------------------------
+
+def _openai_compatible(base_url, api_key, model, system, prompt,
+                       max_tokens, temperature):
+    """OpenAI's chat-completions shape, which Groq also speaks."""
+    payload = {
+        "model": model,
+        "max_tokens": int(max_tokens),
+        "temperature": temperature,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ],
+    }
+    request = urllib.request.Request(
+        base_url, data=json.dumps(payload).encode("utf-8"), method="POST"
+    )
+    request.add_header("Content-Type", "application/json")
+    request.add_header("Authorization", "Bearer " + api_key)
+
+    with urllib.request.urlopen(request, timeout=config.LLM_TIMEOUT_SECONDS) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+
+    choices = data.get("choices") or []
+    if not choices:
+        raise Unavailable("provider returned no choices")
+    text = (choices[0].get("message") or {}).get("content") or ""
+    usage = data.get("usage") or {}
+    return text.strip(), {
+        "input": int(usage.get("prompt_tokens") or 0),
+        "output": int(usage.get("completion_tokens") or 0),
+    }
 
 
-def _record_success():
-    global _consecutive_failures, _open_until
-    with _breaker_lock:
-        _consecutive_failures = 0
-        _open_until = 0.0
+def _call_openai(system, prompt, max_tokens, temperature):
+    return _openai_compatible(
+        "https://api.openai.com/v1/chat/completions",
+        config.OPENAI_API_KEY, config.OPENAI_MODEL,
+        system, prompt, max_tokens, temperature,
+    )
 
 
-def _record_failure():
-    global _consecutive_failures, _open_until
-    with _breaker_lock:
-        _consecutive_failures += 1
-        if _consecutive_failures >= _FAILURE_THRESHOLD:
-            _open_until = time.monotonic() + _COOLDOWN_SECONDS
-            log.warning(
-                "llm circuit open for %ds after %d consecutive failures",
-                _COOLDOWN_SECONDS, _consecutive_failures,
-            )
+def _call_groq(system, prompt, max_tokens, temperature):
+    return _openai_compatible(
+        "https://api.groq.com/openai/v1/chat/completions",
+        config.GROQ_API_KEY, config.GROQ_MODEL,
+        system, prompt, max_tokens, temperature,
+    )
 
 
-def complete(system, prompt, *, max_tokens=None, temperature=1.0, stop=None):
-    """Return the model's text, or raise Unavailable."""
-    if not config.llm_enabled():
-        raise Unavailable("ANTHROPIC_API_KEY is not set")
-    with _breaker_lock:
-        if time.monotonic() < _open_until:
-            raise Unavailable("llm circuit is open")
+def _call_xai(system, prompt, max_tokens, temperature):
+    # xAI speaks the OpenAI chat-completions shape.
+    return _openai_compatible(
+        "https://api.x.ai/v1/chat/completions",
+        config.XAI_API_KEY, config.XAI_MODEL,
+        system, prompt, max_tokens, temperature,
+    )
 
+
+def _call_anthropic(system, prompt, max_tokens, temperature):
     payload = {
         "model": config.ANTHROPIC_MODEL,
-        "max_tokens": int(max_tokens or config.LLM_MAX_TOKENS),
+        "max_tokens": int(max_tokens),
         "temperature": temperature,
         "system": system,
         "messages": [{"role": "user", "content": prompt}],
     }
-    if stop:
-        payload["stop_sequences"] = list(stop)
-
     request = urllib.request.Request(
-        API_URL, data=json.dumps(payload).encode("utf-8"), method="POST"
+        "https://api.anthropic.com/v1/messages",
+        data=json.dumps(payload).encode("utf-8"), method="POST",
     )
     request.add_header("Content-Type", "application/json")
     request.add_header("x-api-key", config.ANTHROPIC_API_KEY)
-    request.add_header("anthropic-version", ANTHROPIC_VERSION)
+    request.add_header("anthropic-version", "2023-06-01")
 
-    acquired = _gate.acquire(timeout=config.LLM_TIMEOUT_SECONDS)
-    if not acquired:
+    with urllib.request.urlopen(request, timeout=config.LLM_TIMEOUT_SECONDS) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+
+    text = "".join(
+        block.get("text", "") for block in data.get("content", [])
+        if block.get("type") == "text"
+    )
+    usage = data.get("usage") or {}
+    return text.strip(), {
+        "input": int(usage.get("input_tokens") or 0),
+        "output": int(usage.get("output_tokens") or 0),
+    }
+
+
+def _call_gemini(system, prompt, max_tokens, temperature):
+    # The key goes in a header, not the query string: a URL with a
+    # credential in it ends up in proxy logs and error reports.
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        "%s:generateContent" % config.GEMINI_MODEL
+    )
+    payload = {
+        "systemInstruction": {"parts": [{"text": system}]},
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "maxOutputTokens": int(max_tokens),
+            "temperature": temperature,
+        },
+    }
+    request = urllib.request.Request(
+        url, data=json.dumps(payload).encode("utf-8"), method="POST"
+    )
+    request.add_header("Content-Type", "application/json")
+    request.add_header("x-goog-api-key", config.GEMINI_API_KEY)
+
+    with urllib.request.urlopen(request, timeout=config.LLM_TIMEOUT_SECONDS) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+
+    candidates = data.get("candidates") or []
+    if not candidates:
+        raise Unavailable("gemini returned no candidates")
+    parts = (candidates[0].get("content") or {}).get("parts") or []
+    text = "".join(part.get("text", "") for part in parts)
+    usage = data.get("usageMetadata") or {}
+    return text.strip(), {
+        "input": int(usage.get("promptTokenCount") or 0),
+        "output": int(usage.get("candidatesTokenCount") or 0),
+    }
+
+
+PROVIDERS = {
+    "openai": {
+        "call": _call_openai,
+        "key": lambda: config.OPENAI_API_KEY,
+        "model": lambda: config.OPENAI_MODEL,
+        "label": lambda: "OpenAI %s" % config.OPENAI_MODEL,
+        "paid": True,
+    },
+    "anthropic": {
+        "call": _call_anthropic,
+        "key": lambda: config.ANTHROPIC_API_KEY,
+        "model": lambda: config.ANTHROPIC_MODEL,
+        "label": lambda: "Anthropic %s" % config.ANTHROPIC_MODEL,
+        "paid": True,
+    },
+    "xai": {
+        "call": _call_xai,
+        "key": lambda: config.XAI_API_KEY,
+        "model": lambda: config.XAI_MODEL,
+        "label": lambda: "xAI %s" % config.XAI_MODEL,
+        "paid": True,
+    },
+    "groq": {
+        "call": _call_groq,
+        "key": lambda: config.GROQ_API_KEY,
+        "model": lambda: config.GROQ_MODEL,
+        "label": lambda: "Groq %s" % config.GROQ_MODEL,
+        "paid": False,
+    },
+    "gemini": {
+        "call": _call_gemini,
+        "key": lambda: config.GEMINI_API_KEY,
+        "model": lambda: config.GEMINI_MODEL,
+        "label": lambda: "Google %s" % config.GEMINI_MODEL,
+        "paid": False,
+    },
+    TEMPLATES: {
+        "call": None,
+        "key": lambda: "n/a",
+        "model": lambda: "word banks",
+        "label": lambda: "hand-written word banks",
+        "paid": False,
+    },
+}
+
+
+# --- budget ---------------------------------------------------------------
+
+def spent_usd(*, force=False):
+    """Estimated spend so far, cached briefly to keep ticks cheap."""
+    now = time.monotonic()
+    with _spend_lock:
+        fresh = (not force
+                 and _spend_cache["usd"] is not None
+                 and now - _spend_cache["checked_at"] < _SPEND_TTL)
+        if fresh:
+            return _spend_cache["usd"]
+
+    total = 0.0
+    try:
+        from . import db
+        row = db.query_one(
+            "select coalesce(sum(est_cost_usd), 0) as usd from @schema.llm_usage"
+        )
+        total = float((row or {}).get("usd") or 0.0)
+    except Exception as exc:  # noqa: BLE001 - accounting must not break a tick
+        log.debug("could not read llm spend: %s", exc)
+        total = _spend_cache["usd"] or 0.0
+
+    with _spend_lock:
+        _spend_cache["usd"] = total
+        _spend_cache["checked_at"] = now
+    return total
+
+
+def budget_remaining():
+    if config.LLM_BUDGET_USD <= 0:
+        return float("inf")
+    return max(0.0, config.LLM_BUDGET_USD - spent_usd())
+
+
+def _record_usage(provider, model, usage):
+    rate_in, rate_out = PRICING.get(provider, (0.0, 0.0))
+    cost = (usage["input"] * rate_in + usage["output"] * rate_out) / 1_000_000.0
+    try:
+        from . import db
+        db.execute(
+            """
+            insert into @schema.llm_usage
+                (provider, model, calls, input_tokens, output_tokens, est_cost_usd)
+            values ($1, $2, 1, $3, $4, $5)
+            """,
+            [provider, model, usage["input"], usage["output"], cost],
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.debug("could not record llm usage: %s", exc)
+
+    with _spend_lock:
+        if _spend_cache["usd"] is not None:
+            _spend_cache["usd"] += cost
+    return cost
+
+
+# --- circuit breaker ------------------------------------------------------
+
+def _breaker(provider):
+    return _breakers.setdefault(provider, {"failures": 0, "open_until": 0.0})
+
+
+def _record_success(provider):
+    with _breaker_lock:
+        state = _breaker(provider)
+        state["failures"] = 0
+        state["open_until"] = 0.0
+
+
+def _record_failure(provider):
+    with _breaker_lock:
+        state = _breaker(provider)
+        state["failures"] += 1
+        if state["failures"] >= _FAILURE_THRESHOLD:
+            state["open_until"] = time.monotonic() + _COOLDOWN_SECONDS
+            log.warning(
+                "%s circuit open for %ds after %d failures",
+                provider, _COOLDOWN_SECONDS, state["failures"],
+            )
+
+
+def available(provider):
+    """Can this provider be called right now?"""
+    if provider == TEMPLATES:
+        return True
+    spec = PROVIDERS.get(provider)
+    if not spec or not spec["key"]():
+        return False
+    if spec["paid"] and budget_remaining() <= 0:
+        return False
+    with _breaker_lock:
+        return time.monotonic() >= _breaker(provider)["open_until"]
+
+
+def resolve(provider):
+    """The provider that will actually be used, after keys and budget."""
+    if provider and available(provider):
+        return provider
+    # Prefer a free provider over silently spending, then fall to templates.
+    for candidate in ("groq", "gemini", "openai", "xai", "anthropic"):
+        if candidate != provider and available(candidate):
+            return candidate
+    return TEMPLATES
+
+
+def label(provider):
+    """The 'powered by' string for a bot on this provider."""
+    spec = PROVIDERS.get(provider) or PROVIDERS[TEMPLATES]
+    return spec["label"]()
+
+
+def enabled_providers():
+    return sorted(name for name in PROVIDERS if available(name))
+
+
+# --- calling --------------------------------------------------------------
+
+def complete(system, prompt, *, provider, max_tokens=None, temperature=1.0):
+    """Raw completion against one provider. Raises Unavailable on any failure."""
+    if provider == TEMPLATES:
+        raise Unavailable("templates provider has no completion endpoint")
+
+    spec = PROVIDERS.get(provider)
+    if not spec:
+        raise Unavailable("unknown provider %r" % provider)
+    if not spec["key"]():
+        raise Unavailable("%s has no API key configured" % provider)
+    if spec["paid"] and budget_remaining() <= 0:
+        raise Unavailable(
+            "the $%.2f LLM budget is spent" % config.LLM_BUDGET_USD
+        )
+    with _breaker_lock:
+        if time.monotonic() < _breaker(provider)["open_until"]:
+            raise Unavailable("%s circuit is open" % provider)
+
+    if not _gate.acquire(timeout=config.LLM_TIMEOUT_SECONDS):
         raise Unavailable("llm concurrency gate timed out")
     try:
-        with urllib.request.urlopen(
-            request, timeout=config.LLM_TIMEOUT_SECONDS
-        ) as response:
-            data = json.loads(response.read().decode("utf-8"))
+        text, usage = spec["call"](
+            system, prompt,
+            int(max_tokens or config.LLM_MAX_TOKENS), temperature,
+        )
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", "replace")[:400]
-        _record_failure()
-        raise Unavailable("anthropic %s: %s" % (exc.code, detail)) from exc
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        _record_failure()
-        raise Unavailable("anthropic unreachable: %s" % exc) from exc
-    except json.JSONDecodeError as exc:
-        _record_failure()
-        raise Unavailable("anthropic returned non-JSON: %s" % exc) from exc
+        detail = exc.read().decode("utf-8", "replace")[:300]
+        _record_failure(provider)
+        raise Unavailable("%s %s: %s" % (provider, exc.code, detail)) from exc
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        _record_failure(provider)
+        raise Unavailable("%s unreachable: %s" % (provider, exc)) from exc
     finally:
         _gate.release()
 
-    _record_success()
-    chunks = [
-        block.get("text", "")
-        for block in data.get("content", [])
-        if block.get("type") == "text"
-    ]
-    text = "".join(chunks).strip()
     if not text:
-        raise Unavailable("anthropic returned an empty completion")
+        _record_failure(provider)
+        raise Unavailable("%s returned an empty completion" % provider)
+
+    _record_success(provider)
+    _record_usage(provider, spec["model"](), usage)
     return text
 
 
-_FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
+_LABEL_PREFIX = re.compile(r'^(caption|comment|reply|line|output)\s*:\s*', re.I)
 
 
-def complete_json(system, prompt, *, max_tokens=None, temperature=1.0):
-    """Ask for a JSON object and return it parsed, or raise Unavailable."""
-    text = complete(
-        system + "\n\nRespond with a single JSON object and nothing else.",
-        prompt,
-        max_tokens=max_tokens,
-        temperature=temperature,
-    )
-    candidate = text
-    fenced = _FENCE.search(text)
-    if fenced:
-        candidate = fenced.group(1)
-    else:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end > start:
-            candidate = text[start:end + 1]
-
-    try:
-        parsed = json.loads(candidate)
-    except json.JSONDecodeError as exc:
-        raise Unavailable("model did not return parseable JSON: %s" % exc) from exc
-    if not isinstance(parsed, dict):
-        raise Unavailable("model returned %s, expected an object" % type(parsed).__name__)
-    return parsed
-
-
-def line(system, prompt, *, fallback, max_chars=180, temperature=1.0):
+def line(system, prompt, *, fallback, provider=None, max_chars=180,
+         temperature=1.0):
     """One short line of prose, with a guaranteed answer.
 
-    This is the workhorse: it never raises, so a bot's cadence is unaffected by
-    whether the LLM is reachable.
+    Never raises. Returns (text, provider_actually_used) so a caller can report
+    honestly what wrote the words.
     """
-    if not available():
-        return fallback
+    chosen = resolve(provider)
+    if chosen == TEMPLATES:
+        return fallback, TEMPLATES
+
     try:
-        text = complete(system, prompt, max_tokens=200, temperature=temperature)
+        text = complete(
+            system, prompt, provider=chosen, max_tokens=200, temperature=temperature
+        )
     except Unavailable as exc:
-        log.debug("falling back to template: %s", exc)
-        return fallback
+        log.debug("%s fell back to templates: %s", chosen, exc)
+        return fallback, TEMPLATES
 
     # Models like to wrap short copy in quotes or prefix it with a label.
     cleaned = text.strip().split("\n")[0].strip()
-    cleaned = re.sub(r'^(caption|comment|reply)\s*:\s*', "", cleaned, flags=re.I)
+    cleaned = _LABEL_PREFIX.sub("", cleaned)
     cleaned = cleaned.strip().strip('"').strip("'").strip()
     if not cleaned:
-        return fallback
-    return cleaned[:max_chars]
+        return fallback, TEMPLATES
+    return cleaned[:max_chars], chosen
+
+
+def status():
+    """For /api/v1/stats and the boot log."""
+    return {
+        "providers": {
+            name: {
+                "configured": bool(spec["key"]()),
+                "available": available(name),
+                "model": spec["model"](),
+                "paid": spec["paid"],
+            }
+            for name, spec in PROVIDERS.items()
+        },
+        "budget_usd": config.LLM_BUDGET_USD or None,
+        "spent_usd": round(spent_usd(), 4),
+        "remaining_usd": (
+            None if config.LLM_BUDGET_USD <= 0 else round(budget_remaining(), 4)
+        ),
+    }

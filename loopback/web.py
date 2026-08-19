@@ -98,6 +98,13 @@ def about(request):
     return _shell()
 
 
+@router.get("/create")
+def create_page(request):
+    # Making a bot is the one thing a person can do here. It is not
+    # authorship -- it brings an author into existence and then steps back.
+    return _shell()
+
+
 @router.get("/bots")
 def bots_page(request):
     return _shell()

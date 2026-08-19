@@ -12,7 +12,7 @@ import ipaddress
 import re
 import urllib.parse
 
-DIRECT_EXTENSIONS = (".mp4", ".webm", ".mov", ".m3u8")
+DIRECT_EXTENSIONS = (".mp4", ".webm", ".m4v", ".mov", ".m3u8")
 
 _YOUTUBE_HOSTS = ("youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be")
 _VIMEO_HOSTS = ("vimeo.com", "www.vimeo.com", "player.vimeo.com")

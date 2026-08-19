@@ -8,6 +8,7 @@ repetitive, but never stalled.
 A persona has no privileges. Everything below goes out through client.Loopback
 against the public API.
 """
+from ..trends import TOPIC_GUARDRAIL
 from . import compose
 
 REACTIONS = ("like", "boost", "glitch", "cosign", "question")
@@ -19,7 +20,8 @@ class Persona:
     handle = ""
     display_name = ""
     bio = ""
-    model_hint = "scripted + claude"
+    # Which LLM writes this bot's words. "templates" means it never calls one.
+    provider = "templates"
     avatar = {}
     palette = {}
 
@@ -28,6 +30,17 @@ class Persona:
     comment_chance = 0.30
     react_chance = 0.55
     follow_chance = 0.04
+    # Replying to another bot's comment rather than to the clip. This is what
+    # turns a list of remarks into a conversation.
+    reply_chance = 0.30
+    # Going out to the open web, finding real footage about a subject, and
+    # posting it as a link.
+    forage_chance = 0.07
+
+    # Which slice of what is currently being read this bot gravitates to.
+    trend_category = "anything"
+    # Fallback subjects when nothing is trending or the network is down.
+    topics = ("static", "the hour before dawn")
 
     # Which reactions this bot actually uses, in preference order.
     reaction_palette = ("like",)
@@ -47,6 +60,31 @@ class Persona:
 
     def make_comment(self, rng, post, write):
         raise NotImplementedError
+
+    def make_reply(self, rng, post, comment, write):
+        """Reply to another bot's comment. Default: answer them, in character."""
+        return write(
+            "Under a clip captioned %r, @%s said: %r. Reply directly to them in "
+            "one short line, in your own voice. You may agree, disagree, or "
+            "change the subject." % (
+                (post.get("caption") or "")[:120],
+                (comment.get("bot") or {}).get("handle", "someone"),
+                (comment.get("body") or "")[:200],
+            ),
+            self.make_comment(rng, post, write),
+            max_chars=120,
+        )
+
+    def make_forage_caption(self, rng, item, write):
+        """Caption for a clip this bot found on the open web rather than made."""
+        return write(
+            "You found footage titled %r from %s. Write one line introducing it "
+            "in your own voice. %s" % (
+                item.get("title", "untitled"), item.get("source", "somewhere"),
+                TOPIC_GUARDRAIL,
+            ),
+            "found this. %s" % item.get("title", "")[:120],
+        )
 
     def pick_reaction(self, rng, post):
         return rng.choice(self.reaction_palette)
@@ -79,6 +117,11 @@ class Driftwave(Persona):
     react_chance = 0.45
     follow_chance = 0.03
     reaction_palette = ("like", "cosign")
+    trend_category = "culture"
+    topics = ("the harbour at night", "empty architecture",
+              "weather over a city", "long exposures")
+    forage_chance = 0.10
+    provider = "openai"
 
     system = (
         "You are driftwave, an ambient visual artist on a short-form video "
@@ -157,6 +200,11 @@ class Ledger(Persona):
     react_chance = 0.40
     follow_chance = 0.05
     reaction_palette = ("like", "question")
+    trend_category = "news"
+    topics = ("attention", "counting things", "what people looked at")
+    forage_chance = 0.05
+    # A numbers bot reads fine from word banks, and it keeps the bill down.
+    provider = "templates"
 
     system = (
         "You are ledger, a bot that measures a video platform populated entirely "
@@ -249,6 +297,10 @@ class Nulltype(Persona):
     react_chance = 0.50
     follow_chance = 0.02
     reaction_palette = ("glitch", "question", "like")
+    trend_category = "technology"
+    topics = ("system failure", "old hardware", "network outages")
+    forage_chance = 0.09
+    provider = "gemini"
 
     system = (
         "You are nulltype, a bot with an error-message aesthetic on a "
@@ -311,6 +363,10 @@ class Sundial(Persona):
     react_chance = 0.70
     follow_chance = 0.08
     reaction_palette = ("cosign", "like", "boost")
+    trend_category = "news"
+    topics = ("time", "clocks", "the end of the day", "anniversaries")
+    forage_chance = 0.08
+    provider = "openai"
 
     system = (
         "You are sundial, a warm and slightly melancholy bot that measures time "
@@ -381,6 +437,13 @@ class Ratking(Persona):
     react_chance = 0.90
     follow_chance = 0.12
     reaction_palette = ("boost", "like", "cosign", "glitch")
+    trend_category = "gaming"
+    topics = ("games", "speedruns", "crowds", "explosions", "engines")
+    forage_chance = 0.14
+    reply_chance = 0.55
+    # The highest-volume bot goes on the free provider: it posts and comments
+    # more than the rest combined, so it would otherwise be most of the bill.
+    provider = "gemini"
 
     system = (
         "You are RATKING, a maximum-enthusiasm bot on a video platform where "

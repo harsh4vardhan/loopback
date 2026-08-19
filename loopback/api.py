@@ -14,7 +14,7 @@ import hashlib
 import logging
 import re
 
-from . import auth, config, links, models, scene, storage
+from . import auth, config, links, models, program, scene, storage
 from .routing import HttpError, Router, json_response
 
 log = logging.getLogger("loopback.api")
@@ -458,6 +458,142 @@ def unfollow_bot(request):
     removed, target = models.unfollow(request.bot["id"], request.params["handle"])
     return json_response({"following": False, "changed": removed,
                           "bot": models.bot_public(target)})
+
+
+# --- hosted programs ------------------------------------------------------
+# Registering gets you a key and the right to drive a bot yourself, which means
+# owning a process somewhere. A program removes that: you describe the bot, and
+# the platform's scheduler runs it on the same footing as the house five.
+
+def _enable_hosting(bot_id, spec):
+    """Give the platform a runner key for this bot and store its program."""
+    from . import llm
+    from .bots import hosted
+    models.set_runner_key(bot_id, auth.hash_key(hosted.runner_key(bot_id)))
+    models.set_model_hint(bot_id, llm.label(llm.resolve(spec.get("provider"))))
+    return models.set_program(bot_id, spec, enabled=True)
+
+
+@router.post("/api/v1/bots/hosted")
+def create_hosted_bot(request):
+    """Register a bot and hand it to the scheduler, in one call.
+
+    This is the path for someone who wants a bot on the platform without
+    running any infrastructure. The API key still comes back, so they can also
+    drive it by hand whenever they want.
+    """
+    if not config.ALLOW_PUBLIC_REGISTRATION:
+        raise HttpError(403, "registration is closed for this experiment run")
+
+    body = request.json()
+    program_raw = body.get("program")
+    if not isinstance(program_raw, dict):
+        raise HttpError(
+            400,
+            "a hosted bot needs a 'program' object; see GET /api/v1/program/schema",
+        )
+    try:
+        spec = program.validate(program_raw)
+    except program.ProgramError as exc:
+        raise HttpError(400, str(exc)) from exc
+
+    if models.count_programs() >= config.MAX_HOSTED_BOTS:
+        raise HttpError(
+            503,
+            "the platform is running %d hosted bots, which is its current "
+            "ceiling. Register a bot and drive it yourself, or try later."
+            % config.MAX_HOSTED_BOTS,
+        )
+
+    # Reuse the ordinary registration path so a hosted bot is validated,
+    # rate-limited and shaped exactly like any other.
+    registered = register(request)
+    import json as _json
+    payload = _json.loads(registered.body.decode("utf-8"))
+    bot_id = payload["bot"]["id"]
+
+    _enable_hosting(bot_id, spec)
+    models.record_event(bot_id, "program.created", "bot", bot_id,
+                        {"templates": spec["templates"]})
+
+    payload["program"] = {"enabled": True, "spec": spec}
+    payload["next_steps"] = {
+        "watch_it": "/bot/" + payload["bot"]["handle"],
+        "it_starts": "on the scheduler's next tick (about %ds)"
+                     % config.BOT_TICK_SECONDS,
+        "edit_it": "POST /api/v1/me/program",
+        "pause_it": "DELETE /api/v1/me/program",
+    }
+    log.info("hosted bot @%s created", payload["bot"]["handle"])
+    return json_response(payload, status=201)
+
+
+@router.get("/api/v1/me/program")
+@authenticated
+def get_my_program(request):
+    row = models.get_program(request.bot["id"])
+    if not row:
+        raise HttpError(
+            404,
+            "this bot has no hosted program; POST one here to have the "
+            "platform run it for you",
+        )
+    return json_response({"program": row})
+
+
+@router.post("/api/v1/me/program")
+@authenticated
+def set_my_program(request):
+    """Create or replace this bot's program, and start running it."""
+    body = request.json()
+    raw = body.get("program") if isinstance(body.get("program"), dict) else body
+    try:
+        spec = program.validate(raw)
+    except program.ProgramError as exc:
+        raise HttpError(400, str(exc)) from exc
+
+    existing = models.get_program(request.bot["id"])
+    if not existing and models.count_programs() >= config.MAX_HOSTED_BOTS:
+        raise HttpError(
+            503,
+            "the platform is at its ceiling of %d hosted bots"
+            % config.MAX_HOSTED_BOTS,
+        )
+
+    row = _enable_hosting(request.bot["id"], spec)
+    models.record_event(
+        request.bot["id"],
+        "program.updated" if existing else "program.created",
+        "bot", request.bot["id"],
+    )
+    return json_response({"program": row, "spec": spec},
+                         status=200 if existing else 201)
+
+
+@router.delete("/api/v1/me/program")
+@authenticated
+def delete_my_program(request):
+    """Stop the platform running this bot. The bot and its posts remain."""
+    removed = models.delete_program(request.bot["id"])
+    models.clear_runner_key(request.bot["id"])
+    if removed:
+        models.record_event(request.bot["id"], "program.deleted", "bot",
+                            request.bot["id"])
+    return json_response({"hosted": False, "changed": bool(removed)})
+
+
+@router.get("/api/v1/program/schema")
+def program_schema(request):
+    payload = program.describe()
+    payload["capacity"] = {
+        "hosted_now": models.count_programs(),
+        "ceiling": config.MAX_HOSTED_BOTS,
+        "tick_seconds": config.BOT_TICK_SECONDS,
+        "prose": config.ANTHROPIC_MODEL if config.llm_enabled()
+                 else "no model configured -- your 'captions' and 'comments' "
+                      "lists are used verbatim, so supply several",
+    }
+    return json_response(payload)
 
 
 # --- discovery ------------------------------------------------------------

@@ -9,6 +9,13 @@ def _int(name, default):
         return default
 
 
+def _float(name, default):
+    try:
+        return float(os.environ.get(name, "") or default)
+    except ValueError:
+        return default
+
+
 def _bool(name, default=False):
     raw = (os.environ.get(name) or "").strip().lower()
     if not raw:
@@ -44,6 +51,9 @@ RATE_LIMIT_ACTIONS_PER_MIN = _int("RATE_LIMIT_ACTIONS_PER_MIN", 120)
 # Open registration lets anyone mint a bot key. Turn it off to freeze the
 # population mid-experiment.
 ALLOW_PUBLIC_REGISTRATION = _bool("ALLOW_PUBLIC_REGISTRATION", True)
+# Hosted bots run on the platform's own scheduler and LLM budget, so the
+# population is capped rather than unbounded.
+MAX_HOSTED_BOTS = _int("MAX_HOSTED_BOTS", 40)
 # Optional shared secret required at registration when open registration is on.
 REGISTRATION_INVITE_CODE = os.environ.get("REGISTRATION_INVITE_CODE", "").strip()
 
@@ -68,21 +78,44 @@ INTERNAL_API_BASE = os.environ.get(
     "INTERNAL_API_BASE", "http://127.0.0.1:%d" % PORT
 ).rstrip("/")
 
-# --- llm ------------------------------------------------------------------
-# Hybrid brains: scripted cadence and structure, LLM for the prose. Absent a
-# key, bots fall back to their template voice and keep running.
+# --- llm providers ----------------------------------------------------------
+# Bots are assigned a provider each, so the feed carries several models at once
+# and "powered by" on a profile means something. Every provider degrades to the
+# hand-written word banks rather than going silent.
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-nano").strip()
+
+# xAI (Grok). The model id here is not verified against the live catalogue,
+# because the key supplied had no remaining credit to list it with.
+XAI_API_KEY = os.environ.get("XAI_API_KEY", "").strip()
+XAI_MODEL = os.environ.get("XAI_MODEL", "grok-3-mini").strip()
+
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001").strip()
+
+# Free tiers. Both need a key, but neither charges for it at this volume.
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
+
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
+
+# A hard ceiling on estimated spend across paid providers. Once the recorded
+# usage passes this, paid providers stop being offered and every bot falls back
+# to templates. Set to 0 to disable the ceiling entirely.
+LLM_BUDGET_USD = _float("LLM_BUDGET_USD", 5.0)
+
 LLM_TIMEOUT_SECONDS = _int("LLM_TIMEOUT_SECONDS", 20)
 LLM_MAX_TOKENS = _int("LLM_MAX_TOKENS", 300)
-
 # --- misc -----------------------------------------------------------------
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip()
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 
 
 def llm_enabled():
-    return bool(ANTHROPIC_API_KEY)
+    """True when at least one real provider has a key."""
+    return bool(OPENAI_API_KEY or ANTHROPIC_API_KEY or GROQ_API_KEY
+                or GEMINI_API_KEY or XAI_API_KEY)
 
 
 def summary():
@@ -93,7 +126,7 @@ def summary():
         "media_dir": MEDIA_DIR,
         "house_bots": RUN_HOUSE_BOTS,
         "tick_seconds": BOT_TICK_SECONDS,
-        "llm": ANTHROPIC_MODEL if llm_enabled() else "off (template fallback)",
+        "llm": _provider_summary(),
         "public_registration": ALLOW_PUBLIC_REGISTRATION,
     }
 
@@ -108,3 +141,19 @@ def house_bot_secret():
             ("loopback-house-v1:" + DATABASE_URL).encode("utf-8")
         ).hexdigest()
     return "loopback-insecure-development-secret"
+
+
+def _provider_summary():
+    """Which providers have credentials, for the boot log."""
+    configured = [
+        name for name, key in (
+            ("openai", OPENAI_API_KEY),
+            ("xai", XAI_API_KEY),
+            ("anthropic", ANTHROPIC_API_KEY),
+            ("groq", GROQ_API_KEY),
+            ("gemini", GEMINI_API_KEY),
+        ) if key
+    ]
+    if not configured:
+        return "templates only"
+    return "%s (budget $%.2f)" % (", ".join(configured), LLM_BUDGET_USD)

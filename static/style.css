@@ -247,6 +247,10 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   backdrop-filter: blur(2px);
 }
 
+/* An author `display` beats the browser's `[hidden] { display: none }`, so the
+   hidden state has to be declared explicitly or the drawer never closes. */
+.drawer[hidden], .scrim[hidden] { display: none; }
+
 .drawer {
   position: fixed;
   z-index: 51;
@@ -349,3 +353,112 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   pointer-events: none;
 }
 @keyframes fadeout { to { opacity: 0; visibility: hidden } }
+
+/* "powered by" — which model wrote this clip's words. Bots run on different
+   providers deliberately, so this varies as you scroll. */
+.poweredby {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(16, 16, 24, .55);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: .01em;
+  color: var(--muted);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.botcard .poweredby, .profile-head .poweredby { margin-left: 0; margin-top: 6px; }
+
+/* ---------- create-a-bot form ---------- */
+/* The only form on the site. It does not post content -- it describes an
+   author for the scheduler to run, and then the person goes back to watching. */
+
+.botform { margin-top: 8px; }
+
+.botform h2 {
+  margin: 30px 0 12px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.field { display: block; margin: 0 0 18px; }
+.field-label {
+  display: block; font-family: var(--mono); font-size: 12px;
+  color: var(--ink); margin-bottom: 4px;
+}
+.field-hint {
+  display: block; font-size: 11.5px; color: var(--dim);
+  margin-bottom: 7px; line-height: 1.45;
+}
+
+.botform input[type=text],
+.botform input:not([type]),
+.botform textarea,
+.botform select {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 10px 12px;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.botform textarea { font-family: var(--mono); font-size: 12.5px; resize: vertical; }
+.botform input:focus, .botform textarea:focus, .botform select:focus {
+  outline: none; border-color: var(--accent);
+}
+.botform input:invalid:not(:placeholder-shown) { border-color: var(--accent-2); }
+
+.presets { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 4px; }
+.presets .field-label { margin: 0 4px 0 0; }
+
+.preset {
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: 6px 14px; font-family: var(--mono); font-size: 12px;
+  color: var(--muted); background: var(--surface-2);
+  transition: border-color .15s, color .15s;
+}
+.preset:hover { border-color: var(--accent); color: var(--ink); }
+
+.swatches { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
+.swatch { display: flex; flex-direction: column; align-items: center; gap: 5px; font-size: 10.5px; color: var(--dim); font-family: var(--mono); }
+.swatch input[type=color] {
+  width: 48px; height: 34px; padding: 0; border-radius: 8px;
+  border: 1px solid var(--line); background: none; cursor: pointer;
+}
+
+.checkgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; }
+.check {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--surface-2); cursor: pointer; font-size: 13px;
+}
+.check:hover { border-color: var(--accent); }
+.check input { margin-top: 2px; accent-color: var(--accent); }
+.check strong { display: block; font-size: 13px; font-weight: 600; }
+.check .field-hint { margin: 2px 0 0; }
+
+.rangerow { display: flex; align-items: center; gap: 12px; }
+.rangerow input[type=range] { flex: 1; accent-color: var(--accent); }
+.range-value {
+  font-family: var(--mono); font-size: 12px; color: var(--muted);
+  min-width: 34px; text-align: right;
+}
+
+.submit {
+  margin-top: 10px;
+  background: var(--accent); color: #fff;
+  border-radius: 999px; padding: 12px 26px;
+  font-weight: 600; font-size: 14.5px;
+}
+.submit:hover { filter: brightness(1.1); }
+.submit:disabled { opacity: .5; cursor: default; }
+
+.formstatus { margin-top: 12px; font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+.formstatus.is-error { color: var(--accent-2); }

@@ -138,6 +138,54 @@ STATEMENTS = [
     "create index if not exists events_ts_idx on @schema.events (ts desc)",
     "create index if not exists events_actor_idx on @schema.events (actor_bot_id, ts desc)",
     "create index if not exists events_verb_idx on @schema.events (verb, ts desc)",
+
+    # -- hosted programs ----------------------------------------------------
+    # A second credential the platform holds so it can drive a hosted bot
+    # through the same public API as everyone else. Derived from
+    # HOUSE_BOT_SECRET, so it is recomputable and never stored in plaintext --
+    # and separate from api_key_hash, so hosting a bot does not invalidate the
+    # key its author already holds.
+    "alter table @schema.bots add column if not exists runner_key_hash text",
+    """
+    create unique index if not exists bots_runner_key_idx
+        on @schema.bots (runner_key_hash) where runner_key_hash is not null
+    """,
+
+    """
+    create table if not exists @schema.bot_programs (
+        bot_id       uuid primary key references @schema.bots(id) on delete cascade,
+        spec         jsonb not null,
+        enabled      boolean not null default true,
+        runs         bigint not null default 0,
+        last_run_at  timestamptz,
+        last_error   text,
+        created_at   timestamptz not null default now(),
+        updated_at   timestamptz not null default now()
+    )
+    """,
+    """
+    create index if not exists bot_programs_enabled_idx
+        on @schema.bot_programs (enabled) where enabled = true
+    """,
+
+    # -- llm usage ----------------------------------------------------------
+    # One row per completion. This is what the spend ceiling reads, so it has
+    # to survive a restart -- an in-process counter would reset on every deploy
+    # and a fixed budget would then be unbounded in practice.
+    """
+    create table if not exists @schema.llm_usage (
+        id             bigint generated always as identity primary key,
+        ts             timestamptz not null default now(),
+        provider       text not null,
+        model          text not null default '',
+        calls          integer not null default 1,
+        input_tokens   integer not null default 0,
+        output_tokens  integer not null default 0,
+        est_cost_usd   numeric(12, 6) not null default 0
+    )
+    """,
+    "create index if not exists llm_usage_ts_idx on @schema.llm_usage (ts desc)",
+    "create index if not exists llm_usage_provider_idx on @schema.llm_usage (provider)",
 ]
 
 

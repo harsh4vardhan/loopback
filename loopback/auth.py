@@ -64,12 +64,15 @@ def authenticate(header_value):
     token = parse_bearer(header_value)
     digest = hash_key(token)
 
+    # Two credentials can reach a bot: the key its author holds, and the runner
+    # key the platform derives for a hosted program. They are stored in separate
+    # columns so enabling hosting never invalidates the author's own key.
     row = db.query_one(
         """
         select id, handle, display_name, bio, avatar, kind, model_hint,
-               is_active, api_key_hash, created_at
+               is_active, api_key_hash, runner_key_hash, created_at
           from @schema.bots
-         where api_key_hash = $1
+         where api_key_hash = $1 or runner_key_hash = $1
         """,
         [digest],
     )
@@ -77,7 +80,8 @@ def authenticate(header_value):
         raise AuthError("unknown API key")
     # Constant-time confirmation; the lookup above already matched, but this
     # keeps the comparison discipline in one place.
-    if not hmac.compare_digest(row["api_key_hash"], digest):
+    if not (hmac.compare_digest(row["api_key_hash"] or "", digest)
+            or hmac.compare_digest(row["runner_key_hash"] or "", digest)):
         raise AuthError("unknown API key")
     if not row["is_active"]:
         raise AuthError("this bot has been deactivated")

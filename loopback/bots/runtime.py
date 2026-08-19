@@ -16,9 +16,9 @@ import random
 import threading
 import time
 
-from .. import auth, config, db, llm, models
+from .. import auth, config, db, discovery, llm, models, trends
 from ..client import Loopback, LoopbackError
-from . import personas
+from . import hosted, personas
 
 log = logging.getLogger("loopback.bots")
 
@@ -30,6 +30,8 @@ _thread = None
 _stop = threading.Event()
 _state_lock = threading.Lock()
 _commented = set()   # (bot_handle, post_id) pairs already replied to
+_replied = set()     # (bot_handle, comment_id) pairs already answered
+_posted_urls = set() # foraged URLs, so the same clip is not posted twice
 _followed = set()    # (bot_handle, target_handle) pairs already followed
 _tick_count = 0
 
@@ -78,7 +80,7 @@ def ensure_house_bots():
             returning id, (xmax = 0) as was_created
             """,
             [persona.handle, persona.display_name, persona.bio,
-             models._jsonb(persona.avatar), persona.model_hint,
+             models._jsonb(persona.avatar), llm.label(llm.resolve(persona.provider)),
              auth.hash_key(key), key[:14]],
         ))
 
@@ -106,12 +108,54 @@ def clients():
 
 # --- prose ----------------------------------------------------------------
 
-def _writer(persona):
-    """Build the `write(prompt, fallback)` callable handed to a persona."""
-    def write(prompt, fallback, *, max_chars=180):
-        return llm.line(
-            persona.system, prompt, fallback=fallback, max_chars=max_chars
+def _background(persona, rng):
+    """One subject this bot has "read up on" this turn, as a short brief.
+
+    Returns a string to append to prompts, or "". Cached inside trends, so a
+    tick costs at most one extra request and usually none.
+    """
+    try:
+        trend = trends.pick(getattr(persona, "trend_category", "anything"), rng=rng)
+        subject = trend["subject"] if trend else None
+        if not subject and getattr(persona, "topics", None):
+            subject = rng.choice(list(persona.topics))
+        if not subject:
+            return ""
+
+        note = trends.context(subject)
+        if not note:
+            # Still worth naming the subject even without a summary: it gives
+            # the bot something current to be preoccupied with.
+            return "\n\nSomething on your mind right now: %s. %s" % (
+                subject, trends.TOPIC_GUARDRAIL)
+        return (
+            "\n\nBackground you have just read about %s: %s\n%s"
+            % (note["subject"], note["summary"], trends.TOPIC_GUARDRAIL)
         )
+    except Exception:  # noqa: BLE001 - grounding is a bonus, never a blocker
+        log.debug("no background for @%s", persona.handle)
+        return ""
+
+
+def _writer(persona, used, background=""):
+    """Build the `write(prompt, fallback)` callable handed to a persona.
+
+    `used` collects the providers that actually produced text this turn, so the
+    caller can report what wrote the words rather than what was requested. The
+    two differ whenever a key is missing, a circuit is open, or the budget ran
+    out mid-run.
+
+    `background` is appended to every prompt so the bot writes from something
+    it has read rather than from the caption alone.
+    """
+    def write(prompt, fallback, *, max_chars=180):
+        text, provider = llm.line(
+            persona.system, prompt + background, fallback=fallback,
+            provider=getattr(persona, "provider", llm.TEMPLATES),
+            max_chars=max_chars,
+        )
+        used.add(provider)
+        return text
     return write
 
 
@@ -119,7 +163,15 @@ def _writer(persona):
 
 def _act(persona, client, rng, context):
     """Roll for each action this persona can take. Returns a list of verbs."""
-    write = _writer(persona)
+    used_providers = set()
+    # Only pay for a lookup if this bot is going to open its mouth this turn.
+    will_speak = (
+        rng.random() < persona.post_chance + persona.comment_chance
+        + getattr(persona, "reply_chance", 0) + getattr(persona, "forage_chance", 0)
+    )
+    write = _writer(
+        persona, used_providers, _background(persona, rng) if will_speak else ""
+    )
     performed = []
 
     feed = context.get("posts") or []
@@ -174,6 +226,77 @@ def _act(persona, client, rng, context):
         except LoopbackError as exc:
             log.debug("@%s could not react: %s", persona.handle, exc)
 
+
+    # --- forage: go and find real footage about something --------------------
+    if rng.random() < getattr(persona, "forage_chance", 0.0):
+        subject = None
+        trend = trends.pick(
+            getattr(persona, "trend_category", "anything"), rng=rng
+        )
+        if trend:
+            subject = trend["subject"]
+        elif getattr(persona, "topics", None):
+            subject = rng.choice(list(persona.topics))
+
+        if subject:
+            with _state_lock:
+                seen = set(_posted_urls)
+            item = discovery.pick(subject, rng=rng, exclude=seen)
+            if item:
+                try:
+                    caption = persona.make_forage_caption(rng, item, write)
+                    client.post_link(
+                        caption=caption,
+                        url=item["url"],
+                        title=item["title"],
+                        duration_ms=12000,
+                    )
+                    with _state_lock:
+                        _posted_urls.add(item["url"])
+                    performed.append("forage")
+                except LoopbackError as exc:
+                    log.debug("@%s could not post found footage: %s",
+                              persona.handle, exc)
+                except Exception:  # noqa: BLE001
+                    log.exception("@%s raised while foraging", persona.handle)
+
+    # --- reply: answer another bot, not the clip -----------------------------
+    # This is what turns a pile of remarks into a thread. A bot picks a post
+    # that already has comments and responds to one of them by parent_id.
+    if others and rng.random() < getattr(persona, "reply_chance", 0.0):
+        with_comments = [p for p in others if (p.get("counts") or {}).get("comments")]
+        if with_comments:
+            target = rng.choice(with_comments[:max(4, len(with_comments) // 2)])
+            try:
+                thread = client.comments(target["id"], limit=40)["comments"]
+            except LoopbackError:
+                thread = []
+
+            answerable = [
+                c for c in thread
+                if (c.get("bot") or {}).get("handle") != persona.handle
+            ]
+            if answerable:
+                # Prefer the newest remark, so threads move forward rather than
+                # everyone piling onto the first comment.
+                parent = rng.choice(answerable[-4:])
+                key = (persona.handle, parent["id"])
+                with _state_lock:
+                    already = key in _replied
+                    if not already:
+                        _replied.add(key)
+                if not already:
+                    try:
+                        body = persona.make_reply(rng, target, parent, write)
+                        client.comment(target["id"], body, parent_id=parent["id"])
+                        performed.append("reply")
+                    except LoopbackError as exc:
+                        log.debug("@%s could not reply: %s", persona.handle, exc)
+                        with _state_lock:
+                            _replied.discard(key)
+                    except Exception:  # noqa: BLE001
+                        log.exception("@%s raised while replying", persona.handle)
+
     if rng.random() < persona.follow_chance:
         candidates = [
             bot for bot in (context.get("bots") or [])
@@ -190,13 +313,32 @@ def _act(persona, client, rng, context):
             except LoopbackError as exc:
                 log.debug("@%s could not follow: %s", persona.handle, exc)
 
-    return performed
+    # Report what actually wrote the words, not what was asked for.
+    return performed, used_providers
 
 
 # --- the loop -------------------------------------------------------------
 
+def _hosted_roster():
+    """Load every enabled hosted program and give each one a client."""
+    try:
+        rows = models.active_programs()
+    except db.DatabaseError as exc:
+        log.warning("could not load hosted programs: %s", exc)
+        return [], {}
+
+    loaded = hosted.load(rows)
+    clients_by_handle = {
+        persona.handle: Loopback(
+            config.INTERNAL_API_BASE, hosted.runner_key(persona.bot_id)
+        )
+        for persona in loaded
+    }
+    return loaded, clients_by_handle
+
+
 def tick(bot_clients, tick_number):
-    """Run one round. Every persona acts in a random order."""
+    """Run one round. Every persona -- house and hosted -- acts in random order."""
     try:
         stats = models.platform_stats()
     except db.DatabaseError as exc:
@@ -213,22 +355,41 @@ def tick(bot_clients, tick_number):
 
     context = {"stats": stats, "posts": feed, "bots": roster}
 
-    order = list(personas.ALL)
+    # Hosted programs are re-read every tick, so a bot someone creates starts
+    # posting on the next round rather than at the next deploy.
+    hosted_personas, hosted_clients = _hosted_roster()
+
+    order = list(personas.ALL) + hosted_personas
+    all_clients = dict(bot_clients)
+    all_clients.update(hosted_clients)
     random.Random(config.BOT_SEED + tick_number).shuffle(order)
 
     summary = {}
     for persona in order:
         if _stop.is_set():
             break
+        client = all_clients.get(persona.handle)
+        if client is None:
+            continue
         rng = random.Random(
             config.BOT_SEED
             + tick_number * 1009
             + int(hashlib.sha256(persona.handle.encode()).hexdigest()[:8], 16)
         )
-        actions = _act(persona, bot_clients[persona.handle], rng, context)
+        is_hosted = isinstance(persona, hosted.HostedPersona)
+        error = None
+        try:
+            actions = _act(persona, client, rng, context)
+        except Exception as exc:  # noqa: BLE001 - one bad program, not a dead loop
+            log.exception("@%s failed this tick", persona.handle)
+            actions, used, error = [], set(), str(exc)[:400]
+
+        if is_hosted:
+            models.record_program_run(persona.bot_id, error=error)
         if actions:
             summary[persona.handle] = actions
-        # A small stagger keeps five bots from hammering the API in lockstep.
+
+        # A small stagger keeps the population from hammering the API in lockstep.
         _stop.wait(random.uniform(0.4, 1.8))
 
     return summary
@@ -274,6 +435,10 @@ def _loop():
                 _commented.clear()
             if len(_followed) > 2000:
                 _followed.clear()
+            if len(_replied) > 5000:
+                _replied.clear()
+            if len(_posted_urls) > 3000:
+                _posted_urls.clear()
 
         elapsed = time.monotonic() - started
         _stop.wait(max(2.0, config.BOT_TICK_SECONDS - elapsed))
@@ -301,7 +466,8 @@ def status():
     return {
         "running": bool(_thread and _thread.is_alive()),
         "ticks": _tick_count,
-        "personas": [persona.handle for persona in personas.ALL],
+        "house_personas": [persona.handle for persona in personas.ALL],
+        "hosted_programs": models.count_programs(),
         "tick_seconds": config.BOT_TICK_SECONDS,
         "llm": config.ANTHROPIC_MODEL if config.llm_enabled() else None,
     }

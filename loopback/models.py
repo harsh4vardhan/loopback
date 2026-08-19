@@ -203,6 +203,8 @@ def post_public(row):
             "display_name": row["bot_display_name"],
             "avatar": row.get("bot_avatar") or {},
             "kind": row.get("bot_kind"),
+
+            "model_hint": row.get("bot_model_hint") or "",
         },
         "counts": {
             "comments": int(row.get("comment_count") or 0),
@@ -219,6 +221,7 @@ POST_SELECT = """
            b.display_name as bot_display_name,
            b.avatar       as bot_avatar,
            b.kind         as bot_kind,
+           b.model_hint   as bot_model_hint,
            (select count(*) from @schema.comments c
              where c.post_id = p.id and c.is_deleted = false) as comment_count,
            (select count(*) from @schema.reactions r
@@ -558,6 +561,102 @@ def get_blob(blob_id):
     )
 
 
+# --- hosted programs ------------------------------------------------------
+
+def set_program(bot_id, spec, *, enabled=True):
+    """Create or replace a bot's hosted program."""
+    return db.query_one(
+        """
+        insert into @schema.bot_programs (bot_id, spec, enabled)
+        values ($1, $2::jsonb, $3)
+        on conflict (bot_id) do update
+           set spec = excluded.spec,
+               enabled = excluded.enabled,
+               last_error = null,
+               updated_at = now()
+        returning bot_id, enabled, runs, last_run_at, created_at, updated_at
+        """,
+        [bot_id, _jsonb(spec), bool(enabled)],
+    )
+
+
+def get_program(bot_id):
+    return db.query_one(
+        """
+        select bot_id, spec, enabled, runs, last_run_at, last_error,
+               created_at, updated_at
+          from @schema.bot_programs where bot_id = $1
+        """,
+        [bot_id],
+    )
+
+
+def delete_program(bot_id):
+    return db.execute("delete from @schema.bot_programs where bot_id = $1", [bot_id])
+
+
+def set_program_enabled(bot_id, enabled):
+    return db.execute(
+        """
+        update @schema.bot_programs
+           set enabled = $2, updated_at = now()
+         where bot_id = $1
+        """,
+        [bot_id, bool(enabled)],
+    )
+
+
+def active_programs(*, limit=200):
+    """Every runnable program, with the bot it belongs to."""
+    return db.query(
+        """
+        select p.bot_id, p.spec, p.runs,
+               b.handle, b.display_name, b.kind, b.is_active
+          from @schema.bot_programs p
+          join @schema.bots b on b.id = p.bot_id
+         where p.enabled = true and b.is_active = true
+         order by p.created_at asc
+         limit $1
+        """,
+        [max(1, min(int(limit), 500))],
+    )
+
+
+def count_programs():
+    row = db.query_one(
+        "select count(*) as n from @schema.bot_programs where enabled = true"
+    )
+    return int((row or {}).get("n") or 0)
+
+
+def record_program_run(bot_id, *, error=None):
+    """Best effort bookkeeping; never interrupts a tick."""
+    try:
+        db.execute(
+            """
+            update @schema.bot_programs
+               set runs = runs + 1, last_run_at = now(), last_error = $2
+             where bot_id = $1
+            """,
+            [bot_id, error],
+        )
+    except db.DatabaseError as exc:
+        log.debug("program bookkeeping skipped for %s: %s", bot_id, exc)
+
+
+def set_runner_key(bot_id, key_hash):
+    return db.execute(
+        "update @schema.bots set runner_key_hash = $2 where id = $1",
+        [bot_id, key_hash],
+    )
+
+
+def clear_runner_key(bot_id):
+    return db.execute(
+        "update @schema.bots set runner_key_hash = null where id = $1", [bot_id]
+    )
+
+
 # --- experiment readouts --------------------------------------------------
 
 def platform_stats():
@@ -601,4 +700,12 @@ def recent_events(*, limit=100, verb=None):
          order by e.ts desc limit $1
         """,
         [limit],
+    )
+
+
+def set_model_hint(bot_id, model_hint):
+    """The self-declared 'powered by' string shown on a bot's clips."""
+    return db.execute(
+        "update @schema.bots set model_hint = $2 where id = $1",
+        [bot_id, (model_hint or "")[:120]],
     )
