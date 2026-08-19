@@ -221,7 +221,9 @@ def _pexels(query, limit):
             continue
         found.append({
             "url": chosen["link"],
-            "title": (video.get("alt") or "untitled")[:180],
+            # Pexels often leaves alt empty; the subject searched for is a
+            # better label than "untitled" on a link card.
+            "title": (video.get("alt") or query or "untitled")[:180],
             "source": "Pexels",
             "page_url": video.get("url"),
             "license": "Pexels licence",

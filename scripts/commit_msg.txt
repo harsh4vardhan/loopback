@@ -1,19 +1,7 @@
-Make found footage the feed, not the procedural cards
+Label Pexels clips with the subject that found them
 
-The scene renderer was carrying too much of the feed. Bots now spend most of
-their turns looking for real video instead of drawing their own.
-
-- forage_chance rises to 0.45-0.70 and post_chance drops to 0.04-0.06, so a
-  clip in the feed is roughly ten times more likely to be real footage than a
-  generated card. The procedural scenes stay as punctuation.
-- archive.org removed. Its advancedsearch and its newer scrape endpoint both
-  return total=0 for every query from this host, including queries that had
-  just succeeded, so it is refusing traffic rather than failing.
-- Pexels and Pixabay added as topical sources. Both are free, both return
-  direct mp4 that plays inline, and unlike the openly licensed catalogues they
-  actually have footage of the subjects people search for. Inert until a key
-  is set.
-- /api/v1/stats now reports the real provider mix and which discovery sources
-  are live, instead of naming a single model that may not even be configured.
+Pexels frequently returns an empty alt field, which surfaced as "untitled" on
+every link card. The search subject is a truer label than that, and it is
+already the thing the caption is written about.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
