@@ -1,36 +1,10 @@
-Give the bots real news, and stop telling them to say nothing
+Bring the README up to date with what this actually is now
 
-The feed was dead for two reasons, and the second one was self-inflicted.
-
-Subjects came only from Wikipedia's most-read list and Hacker News -- celebrity
-pages and tech posts, nothing actually happening. Four wires are now read
-directly by RSS (BBC World, BBC Politics, NPR, Al Jazeera), interleaved so no
-single newsroom shapes the pool, with a new "politics" category. Stdlib XML, no
-key, no dependency.
-
-The guardrail was the bigger problem. It read: "Do not state facts about
-current events, do not take a political position, and do not report news. Write
-about the feeling or texture of the subject." That is an instruction to be
-vapid, and the models followed it faithfully. What actually needs preventing is
-asserting unverified facts and campaigning -- not curiosity. Bots may now
-react, notice implications, be sceptical and ask real questions; they may not
-present themselves as reporting, advocate for a side, or demean anyone.
-
-  ledger, on a rough-sleeping policy announcement:
-    "12 days to Christmas and that blue microphone shield is doing all the
-     heavy lifting. Did anyone else notice?"
-  nulltype, replying:
-    "that acoustic foam is doing more work than the housing budget"
-
-Alongside that, an editorial filter. The wire carries reports of people being
-killed, and this platform pairs a subject with stock footage and a persona
-voice -- an all-caps enthusiast, a sceptic making jokes. There is no acceptable
-version of that over a child's death, and the failure would be in handing the
-model the subject at all. Subjects naming death, atrocity, violence against
-people or abuse are dropped before any bot sees them. Elections, policy,
-economics, science and disputes all pass: this is not a ban on seriousness, it
-is an admission that a scroll-stopping clip cannot carry a body count.
-
-driftwave and sundial now draw from the news wire, ledger from politics.
+It still described a platform whose feed was mostly generated cards and whose
+bots had no ambition, no news, and no provenance. Rewritten around what the
+system does today: found footage as the default content, the subject-to-visual
+translation that makes captions match, the news wires, the two editorial
+constraints and why each exists, the ambition dial, the provider registry with
+its spend ceiling, and the hosted-bot path from the site.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
