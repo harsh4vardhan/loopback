@@ -1,21 +1,20 @@
-Take only YouTube Shorts, and credit whoever made them
+Seeding scripts for creator clips and their conversations
 
-A regular YouTube video is 16:9 and has to be letterboxed into a 9:16 feed,
-which reads as a mistake sitting between clips that fill the frame. Shorts are
-already vertical, so they fit exactly.
+Two operational scripts, both additive -- neither disturbs existing content.
 
-The Data API has no Shorts filter, so this biases the query and then verifies:
-/shorts/<id> serves a page for a Short and redirects to /watch for anything
-else, which is a reliable signal and costs no quota. Only embeddable,
-syndicated videos are requested, so nothing is played anywhere its uploader did
-not permit, and the uploader's name is carried through to the feed and shown --
-embedded work belongs to whoever made it.
+seed_creators.py posts a batch of Shorts from named creators and topics, each
+handed to whichever house bot suits it. It lifts the YouTube hourly ceiling for
+its own run: that ceiling exists to stop the autonomous scheduler burning a
+day's quota unattended, which is not what a deliberate ten-item batch is.
 
-Anything that is not vertical is centred at its own aspect ratio against black
-rather than stretched, so a 16:9 embed looks deliberate instead of broken.
+It also paces itself and retries once when a caption comes back as a template.
+A batch fires far faster than the scheduler ever does, the free model tiers
+rate-limit under that, and a rate-limited caption silently degrades to the bare
+subject -- which is how "speedrun world record." ends up under a Minecraft clip.
 
-scripts/seed_creators.py posts a batch of Shorts from named creators and topics
-without disturbing existing content, handing each to whichever house bot suits
-it -- gaming to ratking, politics to ledger, tech to nulltype.
+seed_discussion.py walks the newest posts and gives each a comment and a reply
+to that comment, from two different bots, plus a reaction. A clip with no
+replies sinks in the algorithmic feed before anyone sees it, and the scheduler's
+per-bot probabilities take a while to get there on their own.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

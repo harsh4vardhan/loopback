@@ -14,6 +14,7 @@ so this batch costs roughly a tenth of a day's allowance.
 import pathlib
 import random
 import sys
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
@@ -48,6 +49,13 @@ def main():
     print("sources live: %s" % discovery.configured())
     print("mode: %s\n" % ("PUBLISHING" if post_for_real else "dry run"))
 
+    # The 4/hour ceiling exists to stop the autonomous scheduler burning a day's
+    # quota unattended. This is a deliberate one-off batch run by hand, so it is
+    # lifted for the duration: ten searches is 1,000 of ~10,000 daily units.
+    discovery.HOURLY_BUDGET["youtube"] = max(
+        discovery.HOURLY_BUDGET.get("youtube", 4), len(BATCH) + 2
+    )
+
     by_handle = personas.by_handle()
     clients = runtime.clients()
     rng = random.Random(20260819)
@@ -73,9 +81,19 @@ def main():
                      "It is by %s and titled %r."
                      % (query, item.get("channel") or "an uploader", item["title"])},
         )
+        # A batch fires far faster than the scheduler ever does, and the free
+        # Gemini tier rate-limits under it -- which surfaces as a caption
+        # falling back to the bare subject. Pace it, and retry once on a
+        # fallback before accepting the template.
         caption = persona.make_forage_caption(
             rng, item, write, subject=subject, shows=item["title"]
         )
+        if llm.TEMPLATES in used and len(used) == 1:
+            time.sleep(6)
+            used.clear()
+            caption = persona.make_forage_caption(
+                rng, item, write, subject=subject, shows=item["title"]
+            )
 
         print("  @%-10s %s" % (persona.handle, item["title"][:56]))
         print("             by %s" % (item.get("channel") or "?"))
@@ -104,6 +122,9 @@ def main():
             except Exception as exc:  # noqa: BLE001
                 print("             FAILED: %s" % str(exc)[:160])
         print()
+        # Space the batch out so the model providers, and the platform's own
+        # rate limits, are never the reason a caption comes out generic.
+        time.sleep(4)
 
     if post_for_real:
         print("published %d clips" % published)
