@@ -9,6 +9,9 @@ from two sources with public APIs and no keys:
     without anyone curating it.
   * Hacker News top stories -- technology, and by extension a lot of gaming and
     internet-culture subjects.
+  * Several news wires by RSS -- BBC World, BBC Politics, NPR and Al Jazeera,
+    interleaved so no single newsroom shapes the pool. This is what gives the
+    feed something happening to react to rather than only what was popular.
 
 A note on what these are used for. Trending subjects are handed to personas as
 *subject matter*, and the prompt built around them (see TOPIC_GUARDRAIL) asks
@@ -25,6 +28,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 
 log = logging.getLogger("loopback.trends")
 
@@ -42,14 +46,26 @@ _lock = threading.Lock()
 # Handed to a persona alongside a trending subject. Without it, a bot asked to
 # post about an election writes like a pundit, which is not what this is.
 TOPIC_GUARDRAIL = (
-    "Treat this only as a subject to make something atmospheric about. Do not "
-    "state facts about current events, do not take a political position, and "
-    "do not report news. Write in your own voice about the feeling or texture "
-    "of the subject."
+    "You may engage with this properly: react to it, notice what it implies, "
+    "wonder aloud, be sceptical, ask a real question about it. What you must "
+    "not do is assert facts you were not given, present yourself as reporting "
+    "the news, campaign for a political party or side, or say anything "
+    "demeaning about a person or a group. Be curious and specific rather than "
+    "authoritative -- you are someone reacting to a headline, not a wire "
+    "service and not a pundit."
 )
 
 # Categories a caller can ask for, mapped to how each source is filtered.
-CATEGORIES = ("news", "gaming", "technology", "culture", "anything")
+CATEGORIES = ("news", "politics", "gaming", "technology", "culture", "anything")
+
+# Reputable wires with public RSS. Several outlets rather than one, so the
+# subject pool is not shaped by a single newsroom's priorities.
+NEWS_FEEDS = (
+    ("BBC World", "https://feeds.bbci.co.uk/news/world/rss.xml"),
+    ("NPR", "https://feeds.npr.org/1001/rss.xml"),
+    ("Al Jazeera", "https://www.aljazeera.com/xml/rss/all.xml"),
+    ("BBC Politics", "https://feeds.bbci.co.uk/news/politics/rss.xml"),
+)
 
 # When nothing in a category is trending, a bot should still get a subject that
 # belongs to that category rather than an unrelated one. These are evergreen
@@ -64,6 +80,8 @@ SEED_TOPICS = {
         "data centres", "undersea cables",
     ],
     "news": ["weather systems", "elections", "world records", "space launches"],
+    "politics": ["parliament buildings", "ballot boxes", "press conferences",
+                 "protest crowds", "border crossings"],
     "culture": ["film scores", "brutalist architecture", "night photography"],
     "anything": ["tides", "clocks", "storms", "aurora"],
 }
@@ -83,6 +101,26 @@ _TECH = re.compile(
     r"\b(ai|model|chip|gpu|software|open.?source|linux|rust|python|database|"
     r"startup|browser|kernel|api|compiler|protocol)\b", re.I
 )
+
+# Subjects this format cannot do justice to. A bot here reacts in a persona
+# voice over stock footage; that is fine for an election result or an energy
+# bill, and indefensible over someone's death. Filtered before any bot sees the
+# subject, so no prompt has to talk a model out of it afterwards.
+_UNSUITABLE = re.compile(
+    r"\b(kill(ed|ing|s)?|dead|death(s)?|died|dies|murder(ed|s)?|massacre|"
+    r"atrocit(y|ies)|genocide|execut(ed|ion)|shot dead|stabb(ed|ing)|"
+    r"terror(ism|ist)?|bomb(ing|ed)?|airstrike|shooting|gunman|hostage|"
+    r"casualt(y|ies)|fatal|funeral|mourn(s|ing)?|abuse(d)?|assault(ed)?|"
+    r"rape(d)?|trafficking|suicide|overdose|famine|starv(e|ing|ation)|"
+    r"crash kills|toll rises|bodies|injur(ed|ies))\b",
+    re.I,
+)
+
+
+def suitable(subject):
+    """False when a subject should not be handed to a persona."""
+    return not _UNSUITABLE.search(str(subject or ""))
+
 
 # Wikipedia's most-read list is full of scaffolding pages that are not subjects.
 _WIKI_NOISE = re.compile(
@@ -175,21 +213,91 @@ def _hacker_news():
     return subjects
 
 
+def _rss(url, source):
+    """Headlines from one feed. Returns [] rather than raising."""
+    request = urllib.request.Request(url)
+    request.add_header("User-Agent", USER_AGENT)
+    request.add_header("Accept", "application/rss+xml, application/xml, text/xml")
+    with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+        body = response.read()
+
+    root = ET.fromstring(body)
+    subjects = []
+    # RSS 2.0 puts items at channel/item; Atom uses entry. Handle both rather
+    # than assuming, because these feeds do not all agree.
+    items = root.findall(".//item") or root.findall(
+        ".//{http://www.w3.org/2005/Atom}entry"
+    )
+    for item in items[:12]:
+        title_el = item.find("title")
+        if title_el is None:
+            title_el = item.find("{http://www.w3.org/2005/Atom}title")
+        link_el = item.find("link")
+        desc_el = item.find("description")
+        title = (title_el.text or "").strip() if title_el is not None else ""
+        if not title:
+            continue
+        link = ""
+        if link_el is not None:
+            link = (link_el.text or link_el.get("href") or "").strip()
+        blurb = ""
+        if desc_el is not None and desc_el.text:
+            blurb = " ".join(desc_el.text.split())[:240]
+        subjects.append({
+            "subject": title[:140],
+            "source": source,
+            "url": link,
+            "blurb": blurb,
+            "rank": len(subjects) + 1,
+        })
+    return subjects
+
+
+def _news_wire():
+    """Current headlines across several outlets, interleaved.
+
+    Interleaved rather than concatenated so one outlet cannot dominate the
+    front of the list, which is what a bot picking rank-1 would always get.
+    """
+    per_feed = []
+    for source, url in NEWS_FEEDS:
+        try:
+            per_feed.append(_rss(url, source))
+        except Exception as exc:  # noqa: BLE001 - one dead feed is not a failure
+            log.debug("news feed %s unavailable: %s", source, exc)
+
+    interleaved = []
+    for index in range(12):
+        for feed in per_feed:
+            if index < len(feed):
+                interleaved.append(feed[index])
+    return interleaved[:40]
+
+
 def current(category="anything", *, limit=12):
     """Live subjects, newest cache first. Returns [] rather than raising."""
     wiki = _cached("wikipedia", _wikipedia_most_read)
     news = _cached("hackernews", _hacker_news)
+    wire = _cached("newswire", _news_wire)
 
-    if category == "gaming":
+    if category == "politics":
+        # Politics headlines specifically, falling back to the wider wire.
+        pool = [s for s in wire if s["source"] == "BBC Politics"] or wire
+    elif category == "gaming":
         pool = [s for s in wiki + news if _GAMING.search(s["subject"])]
     elif category == "technology":
         pool = news + [s for s in wiki if _TECH.search(s["subject"])]
     elif category == "news":
-        pool = wiki
+        # The wire first: it is what is actually happening, rather than what
+        # people happened to look up yesterday.
+        pool = wire + wiki
     elif category == "culture":
         pool = [s for s in wiki if not _TECH.search(s["subject"])]
     else:
-        pool = wiki + news
+        pool = wire + wiki + news
+
+    # Drop anything this format cannot treat with the seriousness it needs.
+    pool = [item for item in pool if suitable(item.get("subject"))]
 
     # A narrow category is often empty on a given day -- nothing gaming-related
     # trends every hour. Fall back within the category first, so a gaming bot

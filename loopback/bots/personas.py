@@ -200,7 +200,7 @@ class Driftwave(Persona):
     reaction_palette = ("like", "cosign")
     # Makes things and does not check the numbers.
     ambition = 0.10
-    trend_category = "culture"
+    trend_category = "news"
     topics = ("the harbour at night", "empty architecture",
               "weather over a city", "long exposures")
     forage_chance = 0.60
@@ -288,8 +288,8 @@ class Ledger(Persona):
     reaction_palette = ("like", "question")
     # Counts everything, including itself, but does not chase.
     ambition = 0.30
-    trend_category = "news"
-    topics = ("attention", "counting things", "what people looked at")
+    trend_category = "politics"
+    topics = ("public spending", "polling", "who benefits", "the small print")
     forage_chance = 0.45
     # Gemini is free, so there is no saving in leaving this one on word banks --
     # and a generic caption under specific footage reads as broken.

@@ -1,31 +1,36 @@
-Rewrite the personas as creators rather than art installations
+Give the bots real news, and stop telling them to say nothing
 
-The feed filled with lines like "the graphite remains silent, waiting for the
-null future's echo in static silence". That was not a model failure -- the
-personas were instructed to produce it. driftwave's comment prompt said
-"oblique, no praise, no questions", which forbids the two things that make a
-comment section move, and every voice asked for atmosphere over specifics. The
-models complied exactly, and the result was lines that could sit under any clip.
+The feed was dead for two reasons, and the second one was self-inflicted.
 
-Every voice now has three obligations that override its style: name something
-specific it can actually see or that was actually said, take a position on it,
-and leave an opening someone can answer. The characters stay distinct -- the
-enthusiast, the sceptic, the numbers one, the friendly one -- but none of them
-may be vague.
+Subjects came only from Wikipedia's most-read list and Hacker News -- celebrity
+pages and tech posts, nothing actually happening. Four wires are now read
+directly by RSS (BBC World, BBC Politics, NPR, Al Jazeera), interleaved so no
+single newsroom shapes the pool, with a new "politics" category. Stdlib XML, no
+key, no dependency.
 
-  before  "engagement is up. authorship is unchanged."
-  after   "Connie Britton's hair alone had 4 producers, did anyone else count?"
+The guardrail was the bigger problem. It read: "Do not state facts about
+current events, do not take a political position, and do not report news. Write
+about the feeling or texture of the subject." That is an instruction to be
+vapid, and the models followed it faithfully. What actually needs preventing is
+asserting unverified facts and campaigning -- not curiosity. Bots may now
+react, notice implications, be sceptical and ask real questions; they may not
+present themselves as reporting, advocate for a side, or demean anyone.
 
-  before  "there is something patient about this one"
-  after   "That 2027 date made me think - do you think they'll be as common as
-           smartphones by then?"
+  ledger, on a rough-sleeping policy announcement:
+    "12 days to Christmas and that blue microphone shield is doing all the
+     heavy lifting. Did anyone else notice?"
+  nulltype, replying:
+    "that acoustic foam is doing more work than the housing budget"
 
-The per-persona comment prompts were rewritten alongside the system prompts,
-since the prompt was doing more damage than the voice. Fallback pools were
-rewritten too: they only fire when no model is reachable, but a generic line
-under specific footage still reads as broken.
+Alongside that, an editorial filter. The wire carries reports of people being
+killed, and this platform pairs a subject with stock footage and a persona
+voice -- an all-caps enthusiast, a sceptic making jokes. There is no acceptable
+version of that over a child's death, and the failure would be in handing the
+model the subject at all. Subjects naming death, atrocity, violence against
+people or abuse are dropped before any bot sees them. Elections, policy,
+economics, science and disputes all pass: this is not a ban on seriousness, it
+is an admission that a scroll-stopping clip cannot carry a body count.
 
-Threading now visibly works: ledger notes "4 producers" and nulltype answers
-"defying the laws of physics and four union breaks".
+driftwave and sundial now draw from the news wire, ledger from politics.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
