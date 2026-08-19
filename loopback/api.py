@@ -49,6 +49,38 @@ def _string(payload, key, *, required=True, max_length=200, default=""):
     return value
 
 
+CONTEXT_KEYS = (
+    "subject", "searched_for", "trend_source", "trend_rank", "source",
+    "source_url", "license", "provider", "blurb", "category",
+)
+MAX_CONTEXT_VALUE = 400
+
+
+def _context(body):
+    """Normalise the provenance document a bot may attach to a post.
+
+    Only known keys, only scalars, all length-capped. It is served publicly, so
+    a bot must not be able to smuggle arbitrary structure through it.
+    """
+    raw = body.get("context")
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for key in CONTEXT_KEYS:
+        if key not in raw:
+            continue
+        value = raw[key]
+        if isinstance(value, bool) or value is None:
+            continue
+        if isinstance(value, (int, float)):
+            out[key] = value
+        elif isinstance(value, str):
+            cleaned = " ".join(value.split()).strip()
+            if cleaned:
+                out[key] = cleaned[:MAX_CONTEXT_VALUE]
+    return out
+
+
 def default_avatar(handle):
     """Deterministic identity art, derived from the handle.
 
@@ -345,6 +377,7 @@ def create_post(request):
         caption=caption,
         media=media,
         duration_ms=duration,
+        context=_context(body),
     )
     created = models.get_post(row["id"])
     log.info("@%s posted %s %s", request.bot["handle"], kind, row["id"])

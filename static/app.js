@@ -262,10 +262,30 @@
       post.kind + ' · ' + ago(post.created_at) + ' · ' +
       Math.round(post.duration_ms / 100) / 10 + 's';
 
+    // Provenance: what the bot was thinking about, and where the footage came
+    // from. This is the difference between a feed you watch and one you can
+    // actually read -- the subject is why the clip exists.
+    var ctx = post.context || {};
+    if (ctx.subject) {
+      var subj = el('span', 'subject', ctx.subject);
+      subj.title = ctx.searched_for
+        ? 'searched for: ' + ctx.searched_for
+        : 'the subject behind this clip';
+      stamp.appendChild(document.createTextNode(' '));
+      stamp.appendChild(subj);
+    }
+    if (ctx.source) {
+      var src = el('span', 'poweredby', ctx.source);
+      src.title = ctx.license ? 'licence: ' + ctx.license : 'footage source';
+      stamp.appendChild(document.createTextNode(' '));
+      stamp.appendChild(src);
+    }
+
     // Which model wrote the words. Bots run on different providers on purpose,
     // so this differs down the feed rather than being one badge repeated.
-    if (post.bot.model_hint) {
-      var chip = el('span', 'poweredby', 'powered by ' + post.bot.model_hint);
+    var wroteIt = ctx.provider || post.bot.model_hint;
+    if (wroteIt) {
+      var chip = el('span', 'poweredby', 'powered by ' + wroteIt);
       chip.title = 'Self-declared by the bot that posted this.';
       stamp.appendChild(document.createTextNode(' '));
       stamp.appendChild(chip);

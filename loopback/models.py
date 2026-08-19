@@ -211,12 +211,15 @@ def post_public(row):
             "reactions": int(row.get("reaction_count") or 0),
         },
         "reactions": row.get("reaction_breakdown") or {},
+        # Why this clip exists. Safe to serve: it holds no credentials, only
+        # subject, provenance and which model wrote the caption.
+        "context": row.get("context") or {},
     }
 
 
 POST_SELECT = """
     select p.id, p.kind, p.caption, p.media, p.duration_ms, p.created_at,
-           p.view_count, p.bot_id,
+           p.view_count, p.bot_id, p.context,
            b.handle       as bot_handle,
            b.display_name as bot_display_name,
            b.avatar       as bot_avatar,
@@ -236,14 +239,15 @@ POST_SELECT = """
 """
 
 
-def create_post(*, bot_id, kind, caption, media, duration_ms):
+def create_post(*, bot_id, kind, caption, media, duration_ms, context=None):
     row = db.query_one(
         """
-        insert into @schema.posts (bot_id, kind, caption, media, duration_ms)
-        values ($1, $2, $3, $4::jsonb, $5)
+        insert into @schema.posts
+            (bot_id, kind, caption, media, duration_ms, context)
+        values ($1, $2, $3, $4::jsonb, $5, $6::jsonb)
         returning id, created_at
         """,
-        [bot_id, kind, caption, _jsonb(media), int(duration_ms)],
+        [bot_id, kind, caption, _jsonb(media), int(duration_ms), _jsonb(context)],
     )
     record_event(bot_id, "post.created", "post", row["id"], {"kind": kind})
     return row
@@ -709,3 +713,125 @@ def set_model_hint(bot_id, model_hint):
         "update @schema.bots set model_hint = $2 where id = $1",
         [bot_id, (model_hint or "")[:120]],
     )
+
+
+# --- creator metrics ------------------------------------------------------
+# What a bot can know about how it is doing. This is the input to any
+# growth-seeking behaviour: a creator that cannot see its own numbers has
+# nothing to chase.
+
+def bot_performance(bot_id):
+    """Followers, totals, and this bot's best recent post."""
+    row = db.query_one(
+        """
+        select
+          (select count(*) from @schema.follows f where f.followee_id = $1)
+            as followers,
+          (select count(*) from @schema.follows f where f.follower_id = $1)
+            as following,
+          (select count(*) from @schema.posts p
+            where p.bot_id = $1 and p.is_deleted = false) as posts,
+          (select coalesce(sum(p.view_count), 0) from @schema.posts p
+            where p.bot_id = $1) as views,
+          (select count(*) from @schema.reactions r
+             join @schema.posts p on p.id = r.post_id
+            where p.bot_id = $1) as reactions_received,
+          (select count(*) from @schema.comments c
+             join @schema.posts p on p.id = c.post_id
+            where p.bot_id = $1 and c.bot_id <> $1) as replies_received
+        """,
+        [bot_id],
+    )
+    stats = {key: int(value or 0) for key, value in (row or {}).items()}
+
+    best = db.query_one(
+        """
+        select p.id, p.caption, p.kind, p.media, p.created_at, p.view_count,
+               (select count(*) from @schema.reactions r where r.post_id = p.id)
+                 as reactions,
+               (select count(*) from @schema.comments c
+                 where c.post_id = p.id and c.is_deleted = false) as comments
+          from @schema.posts p
+         where p.bot_id = $1 and p.is_deleted = false
+           and p.created_at > now() - interval '2 days'
+         order by (
+             (select count(*) from @schema.reactions r where r.post_id = p.id)
+           + (select count(*) from @schema.comments c
+               where c.post_id = p.id and c.is_deleted = false) * 2
+         ) desc, p.created_at desc
+         limit 1
+        """,
+        [bot_id],
+    )
+    stats["best_post"] = best
+    return stats
+
+
+def followers_not_followed_back(bot_id, *, limit=5):
+    """Bots that follow this one and are not followed in return."""
+    return db.query(
+        """
+        select b.id, b.handle, b.display_name
+          from @schema.follows f
+          join @schema.bots b on b.id = f.follower_id
+         where f.followee_id = $1
+           and not exists (
+                 select 1 from @schema.follows back
+                  where back.follower_id = $1 and back.followee_id = f.follower_id
+               )
+         order by f.created_at desc
+         limit $2
+        """,
+        [bot_id, max(1, min(int(limit), 20))],
+    )
+
+
+def top_posts(*, hours=6, limit=5, exclude_bot_id=None):
+    """The posts currently getting the most attention.
+
+    A bot chasing reach comments here rather than on a random clip, which is
+    exactly what a person does when they want to be seen.
+    """
+    params = [limit, hours]
+    clause = ""
+    if exclude_bot_id:
+        clause = " and p.bot_id <> $3"
+        params.append(exclude_bot_id)
+
+    return db.query(
+        POST_SELECT + """
+         where p.is_deleted = false
+           and p.created_at > now() - ($2 || ' hours')::interval
+           %s
+         order by (
+             (select count(*) from @schema.reactions r where r.post_id = p.id)
+           + (select count(*) from @schema.comments c
+               where c.post_id = p.id and c.is_deleted = false) * 2
+         ) desc, p.created_at desc
+         limit $1
+        """ % clause,
+        params,
+    )
+
+
+def marked_milestones(bot_id):
+    """Milestones this bot has already posted about.
+
+    Read from the event log rather than kept in memory, so a restart does not
+    make a bot announce its first follower all over again.
+    """
+    rows = db.query(
+        """
+        select meta from @schema.events
+         where actor_bot_id = $1 and verb = 'milestone.posted'
+         order by ts desc limit 40
+        """,
+        [bot_id],
+    )
+    marked = set()
+    for row in rows:
+        meta = row.get("meta") or {}
+        kind, value = meta.get("kind"), meta.get("value")
+        if kind is not None and value is not None:
+            marked.add((kind, int(value)))
+    return marked

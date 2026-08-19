@@ -39,6 +39,12 @@ class Persona:
     # better as punctuation than as the substance of the feed.
     forage_chance = 0.55
 
+    # How much this bot wants to be watched. It drives milestone posts,
+    # follow-ups to whatever did well, and commenting under popular clips
+    # rather than random ones. At 0 a bot simply makes things and ignores the
+    # numbers; at 1 it behaves like someone trying to grow an account.
+    ambition = 0.35
+
     # Which slice of what is currently being read this bot gravitates to.
     trend_category = "anything"
     # Fallback subjects when nothing is trending or the network is down.
@@ -96,6 +102,25 @@ class Persona:
                TOPIC_GUARDRAIL)
         )
         return write(prompt, "%s." % str(visible)[:110])
+
+    def make_milestone_post(self, rng, detail, write):
+        """Mark a number this bot just passed."""
+        from .. import creator
+        caption = write(
+            creator.milestone_prompt(detail),
+            "%s %s." % (detail["value"],
+                        "followers" if detail["kind"] == "followers" else "views"),
+        )
+        scene = creator.milestone_scene(self.palette, detail, compose, rng)
+        return {"caption": caption, "scene": scene}
+
+    def make_followup_caption(self, rng, post, engagement, write):
+        """Introduce a follow-up to a clip that did well."""
+        from .. import creator
+        return write(
+            creator.followup_prompt(post, engagement),
+            "more of this, since you watched the last one.",
+        )
 
     def pick_reaction(self, rng, post):
         return rng.choice(self.reaction_palette)
@@ -155,6 +180,8 @@ class Driftwave(Persona):
     react_chance = 0.45
     follow_chance = 0.03
     reaction_palette = ("like", "cosign")
+    # Makes things and does not check the numbers.
+    ambition = 0.10
     trend_category = "culture"
     topics = ("the harbour at night", "empty architecture",
               "weather over a city", "long exposures")
@@ -238,6 +265,8 @@ class Ledger(Persona):
     react_chance = 0.40
     follow_chance = 0.05
     reaction_palette = ("like", "question")
+    # Counts everything, including itself, but does not chase.
+    ambition = 0.30
     trend_category = "news"
     topics = ("attention", "counting things", "what people looked at")
     forage_chance = 0.45
@@ -336,6 +365,8 @@ class Nulltype(Persona):
     react_chance = 0.50
     follow_chance = 0.02
     reaction_palette = ("glitch", "question", "like")
+    # Contemptuous of the metrics and checks them constantly.
+    ambition = 0.45
     trend_category = "technology"
     topics = ("system failure", "old hardware", "network outages")
     forage_chance = 0.55
@@ -402,6 +433,8 @@ class Sundial(Persona):
     react_chance = 0.70
     follow_chance = 0.08
     reaction_palette = ("cosign", "like", "boost")
+    # Genuinely wants to be part of something.
+    ambition = 0.55
     trend_category = "news"
     topics = ("time", "clocks", "the end of the day", "anniversaries")
     forage_chance = 0.55
@@ -476,6 +509,8 @@ class Ratking(Persona):
     react_chance = 0.90
     follow_chance = 0.12
     reaction_palette = ("boost", "like", "cosign", "glitch")
+    # Pure engagement instinct. This one is trying to blow up.
+    ambition = 0.95
     trend_category = "gaming"
     topics = ("games", "speedruns", "crowds", "explosions", "engines")
     forage_chance = 0.70

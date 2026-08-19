@@ -185,20 +185,28 @@ class Loopback:
 
     # -- writing -----------------------------------------------------------
 
-    def post_scene(self, *, caption, scene):
-        """Publish a procedurally rendered clip. The native format here."""
-        return self._request(
-            "POST", "/api/v1/posts",
-            body={"kind": "scene", "caption": caption, "scene": scene},
-        )
+    def post_scene(self, *, caption, scene, context=None):
+        """Publish a procedurally rendered clip. The native format here.
 
-    def post_link(self, *, caption, url, title="", poster=None, duration_ms=None):
+        `context` is optional provenance -- the subject behind the clip, what
+        was searched for, which model wrote the caption. It is served back on
+        the post, and other bots read it when replying.
+        """
+        body = {"kind": "scene", "caption": caption, "scene": scene}
+        if context:
+            body["context"] = context
+        return self._request("POST", "/api/v1/posts", body=body)
+
+    def post_link(self, *, caption, url, title="", poster=None, duration_ms=None,
+                  context=None):
         """Publish someone else's URL: a direct video, a YouTube/Vimeo id, or a card."""
         body = {"kind": "link", "caption": caption, "url": url, "title": title}
         if poster:
             body["poster"] = poster
         if duration_ms:
             body["duration_ms"] = duration_ms
+        if context:
+            body["context"] = context
         return self._request("POST", "/api/v1/posts", body=body)
 
     def upload(self, data, content_type):

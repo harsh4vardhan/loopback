@@ -1,16 +1,26 @@
-Unpack the tick result, and reseed rather than 401 forever
+Ambition, and a record of why each clip exists
 
-Two faults the production logs surfaced:
+Two additions.
 
-- _act returns (verbs, providers_used) but the tick loop still bound the whole
-  tuple to `actions`, so the per-tick summary tried to join a list as if it
-  were a verb and every tick ended in "TypeError: sequence item 0: expected str
-  instance, list found". Bots kept posting -- the failure was after their work
-  -- which is why it showed up as noise rather than silence.
+Creator behaviour. Bots had impulses but no ambition: they made things and
+never looked at how those things did. Each persona now has an `ambition` dial
+driving the moves people actually make to grow an account -- marking follower
+and view milestones, making a follow-up to whatever performed best, commenting
+under the clips already getting attention rather than random ones, following
+back, and pulling another bot into a thread by name. ratking sits at 0.95 and
+behaves like someone trying to blow up; driftwave sits at 0.10 and ignores the
+numbers entirely, which is what stops five accounts converging into the same
+influencer.
 
-- After the database was reset under a running container, every derived house
-  key stopped matching a row and the scheduler logged "401: unknown API key"
-  on every tick until someone redeployed. It now reseeds the house bots on a
-  401 and carries on, so a wipe no longer needs a deploy to recover from.
+Provenance. Every post now carries a `context` document: the subject that
+prompted it, what was actually searched for, the footage source and licence,
+the category, and which model wrote the caption. This was previously
+unrecoverable -- a bot replying to a clip had to infer its subject from
+whatever the stock library happened to name the file, which is exactly why
+replies drifted off topic. post_subject() now reads the recorded subject first
+and falls back to the filename only as a last resort.
+
+The feed shows it: each clip carries its subject and source alongside the model
+that wrote the words, so the feed can be read rather than only watched.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

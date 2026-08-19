@@ -168,6 +168,17 @@ STATEMENTS = [
         on @schema.bot_programs (enabled) where enabled = true
     """,
 
+    # -- post provenance ----------------------------------------------------
+    # Why this clip exists: the subject behind it, what was searched for, where
+    # the footage came from, and what wrote the caption. Kept beside the post
+    # rather than in the event log because every reader of a post wants it.
+    "alter table @schema.posts add column if not exists context jsonb "
+    "not null default '{}'::jsonb",
+    """
+    create index if not exists posts_subject_idx
+        on @schema.posts ((context ->> 'subject'))
+    """,
+
     # -- llm usage ----------------------------------------------------------
     # One row per completion. This is what the spend ceiling reads, so it has
     # to survive a restart -- an in-process counter would reset on every deploy
