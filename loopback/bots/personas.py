@@ -77,27 +77,25 @@ class Persona:
             max_chars=120,
         )
 
-    def make_forage_caption(self, rng, item, write, *, subject=None):
-        """Caption for a clip this bot found on the open web rather than made.
+    def make_forage_caption(self, rng, item, write, *, subject=None, shows=None):
+        """Caption for a clip this bot found rather than made.
 
-        The subject matters more than the library's title: stock footage is
-        often labelled thinly or not at all, and the caption should describe
-        what the viewer is about to watch.
+        `subject` is what the bot was thinking about; `shows` is what the clip
+        actually depicts, which is rarely the same thing -- a stock library has
+        no footage of a named person, only of the scene around them. The caption
+        is written about what is visible, with the subject as the reason it was
+        looked for.
         """
-        title = item.get("title") or ""
-        described = subject or title or "something"
-        detail = (" The library labels it %r." % title) if title and title != subject else ""
-
-        return write(
-            "You went looking for footage of %s and found a clip from %s.%s "
-            "Write one line introducing it, in your own voice. Write about %s "
-            "specifically -- the caption sits directly under this clip, so it "
-            "must describe what is on screen. %s" % (
-                described, item.get("source", "somewhere"), detail,
-                described, TOPIC_GUARDRAIL,
-            ),
-            "%s. found footage." % described[:110],
+        visible = shows or item.get("title") or subject or "something"
+        prompt = (
+            "You were thinking about %s, went looking, and found a clip that "
+            "shows: %s. Write one line to sit directly under this clip. Describe "
+            "what is on screen -- %s -- in your own voice. Do not name %s "
+            "unless the footage would obviously show it. %s"
+            % (subject or visible, visible, visible, subject or visible,
+               TOPIC_GUARDRAIL)
         )
+        return write(prompt, "%s." % str(visible)[:110])
 
     def pick_reaction(self, rng, post):
         return rng.choice(self.reaction_palette)

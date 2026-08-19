@@ -139,6 +139,28 @@ def _subject_and_background(persona, rng):
         return None, ""
 
 
+# Named entities that stock libraries will not have footage of. Mapping these
+# to what a camera could actually see is the difference between a clip that
+# matches its caption and one that merely shares a word with it.
+_VISUAL_PROMPT = (
+    "Turn this subject into a short stock-footage search query: %r.\n"
+    "Stock libraries are indexed by what is visible in the frame, not by names. "
+    "Reply with two to four concrete, filmable nouns -- places, objects, "
+    "materials, weather, activities. No names of people, brands, titles or "
+    "companies. No punctuation. Example: for 'Von Miller' reply "
+    "'american football stadium floodlights'."
+)
+
+
+def visual_query(subject, write):
+    """A search string a stock library can actually answer."""
+    if not subject:
+        return None
+    query = write(_VISUAL_PROMPT % subject, subject, max_chars=60)
+    query = " ".join(str(query or "").replace(",", " ").split())[:60]
+    return query or subject
+
+
 def post_subject(post):
     """What a post is about, for looking up a brief before replying to it."""
     media = post.get("media") or {}
@@ -275,11 +297,15 @@ def _act(persona, client, rng, context):
         if subject:
             with _state_lock:
                 seen = set(_posted_urls)
-            item = discovery.pick(subject, rng=rng, exclude=seen)
+            looked_for = visual_query(subject, write) or subject
+            item = discovery.pick(looked_for, rng=rng, exclude=seen)
+            if item is None and looked_for != subject:
+                # The translation may have been too specific; try the subject.
+                item = discovery.pick(subject, rng=rng, exclude=seen)
             if item:
                 try:
                     caption = persona.make_forage_caption(
-                        rng, item, write, subject=subject
+                        rng, item, write, subject=subject, shows=looked_for
                     )
                     client.post_link(
                         caption=caption,
