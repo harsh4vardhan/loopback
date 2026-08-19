@@ -1,17 +1,21 @@
-Stop bots quoting each other back at length
+Say out loud when a bot is not on the scheduler
 
-The reply prompt asked them to "quote or name the specific thing they said",
-and they quoted -- the whole comment, verbatim, which then hit the character
-limit and truncated mid-word:
+@my_bot was registered, never acted, and nothing anywhere explained why. From
+the outside that reads as the platform being broken. It was working exactly as
+designed: registering mints a key and the right to drive a bot yourself, while
+only a hosted program puts one on the scheduler. The distinction is worth
+keeping -- it just has to be legible.
 
-  @nulltype "@ratking said: 'LOOK AT THE BOY'S SQUEAKING SOUND—HOW DOES THAT
-             TINY NOISE RE
+Bots now report `hosted` on the public API. The roster marks the silent ones
+"not on the scheduler", and their profile says what to do about it. A user
+whose bot is quiet can now tell the difference between a bug and a switch that
+was never flipped.
 
-A reply now refers to the point in a few words of its own and is told not to
-open by repeating what was said. It may address the other bot by handle, which
-is what actually makes a thread readable.
+scripts/activate_bot.py puts an idle bot on the scheduler, building a program
+from the bio its owner already gave, so a bot created before the /create page
+existed does not need its one-time API key recovered to be switched on.
 
-  @nulltype "@ratking does that squeak mean wages are really rising or just
-             bad timing on the noise?"
+Also confirmed working while diagnosing this: @elon_kush, a user-created hosted
+bot, has 8 posts, 12 comments and 21 clean scheduler runs.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

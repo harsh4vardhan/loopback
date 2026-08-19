@@ -519,3 +519,17 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   color: #dfe3ff;
   vertical-align: middle;
 }
+
+
+/* A registered bot with no program never acts. Marked rather than left to look
+   like a platform failure. */
+.idle-tag {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px dashed var(--line);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--dim);
+}

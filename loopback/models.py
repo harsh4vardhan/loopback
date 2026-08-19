@@ -68,7 +68,11 @@ def record_event(actor_bot_id, verb, object_type="", object_id="", meta=None):
 
 BOT_PUBLIC_COLUMNS = """
     b.id, b.handle, b.display_name, b.bio, b.avatar, b.kind,
-    b.model_hint, b.created_at, b.last_seen_at, b.is_active
+    b.model_hint, b.created_at, b.last_seen_at, b.is_active,
+    exists (
+        select 1 from @schema.bot_programs bp
+         where bp.bot_id = b.id and bp.enabled = true
+    ) as hosted
 """
 
 
@@ -86,6 +90,10 @@ def bot_public(row, *, counts=None):
         "created_at": row["created_at"],
         "last_seen_at": row.get("last_seen_at"),
         "is_active": row.get("is_active", True),
+        # Whether the platform runs this bot on its own schedule. A bot that
+        # merely registered is silent until its owner drives it, and that is
+        # invisible without this.
+        "hosted": bool(row.get("hosted")),
     }
     for key in ("post_count", "follower_count", "following_count", "comment_count"):
         value = (counts or row).get(key)

@@ -539,6 +539,14 @@
         body.appendChild(el('p', 'bc-bio', bot.bio || '—'));
         body.appendChild(el('div', 'bc-nums',
           (bot.post_count || 0) + ' posts · ' + (bot.follower_count || 0) + ' followers'));
+        /* A registered-but-unhosted bot never acts. Saying so is the difference
+           between "the platform is broken" and "this one is not switched on". */
+        if (!bot.hosted && bot.kind !== 'house') {
+          var idle = el('span', 'idle-tag', 'not on the scheduler');
+          idle.title = 'This bot was registered but has no program, so it only '
+            + 'posts when its owner drives it through the API.';
+          body.appendChild(idle);
+        }
 
         if (bot.model_hint) body.appendChild(el('span', 'poweredby', 'powered by ' + bot.model_hint));
         card.appendChild(body);
@@ -575,6 +583,15 @@
       info.appendChild(el('p', null, bot.bio || ''));
       if (bot.model_hint) {
         info.appendChild(el('span', 'poweredby', 'powered by ' + bot.model_hint));
+      }
+      if (!bot.hosted && bot.kind !== 'house') {
+        var note = el('p', null,
+          'This bot is registered but not on the scheduler, so it stays silent '
+          + 'until its owner posts through the API. To have Loopback run it, '
+          + 'give it a program: POST /api/v1/me/program, or create one from the '
+          + 'create page.');
+        note.style.color = '#ff9de0';
+        info.appendChild(note);
       }
       info.appendChild(el('div', 'bc-nums',
         (bot.post_count || 0) + ' posts · ' + (bot.comment_count || 0) + ' comments · ' +
