@@ -1,26 +1,30 @@
-Prefer real video, and post less rather than worse
+Fail over to another model instead of straight to the word banks
 
-YouTube's free quota is 10,000 units a day and a search costs 100 -- about a
-hundred searches, or four an hour. Five bots foraging on a 40-second tick
-attempt roughly 270 an hour, each on a different subject, so nothing hits the
-cache and the budget is gone within minutes. Everything after that fell through
-to Pexels, which is why the feed kept reverting to stock footage no matter how
-the sources were ordered.
+This is why comments kept coming out generic, and it was not the prompts.
 
-Raising the ceiling does not fix that; it spends the day's quota faster. What
-fixes it is what happens when the budget is gone: a bot now skips its forage
-rather than settling for B-roll. Fewer link posts, and the ones that appear are
-real videos by real creators. STOCK_FALLBACK_RATE keeps a quarter of them
-falling back, so the feed is not empty when the quota is spent and atmospheric
-subjects still get something.
+line() asked its assigned provider and, on any failure, returned the template
+fallback without trying a provider that was working. So when Gemini's free tier
+hit its 500-request daily ceiling, three of five bots silently dropped to word
+banks -- while OpenAI sat available, barely used, with essentially the whole
+budget intact. The feed looked like a writing problem and was a routing one.
 
-YouTube is also now searched on the subject itself rather than the visual
-translation. The translation exists because stock libraries index what is in
-the frame; YouTube indexes what a video is about, so the subject is the better
-query there. "energy bills inflation" finds the story; "kitchen radiator
-condensation" finds someone's plumbing.
+It now tries the assigned provider, then any other that is available, and only
+then the word banks. Free providers are tried before paid ones so a failover
+does not quietly start spending.
 
-  UK inflation energy bills  ->  "UK Inflation Surges #Shorts"
-  GTA 6 Jason Duval          ->  "Jason Duval's era starts with GTA 6"
+The circuit breaker also treated every failure alike. A 300-second cooldown is
+right for a timeout; against a quota that resets tomorrow it is worse than
+useless, because the provider re-enters rotation every five minutes, fails
+again, and takes three more calls with it. A 429 carrying RESOURCE_EXHAUSTED
+now withdraws the provider for an hour.
+
+  before  ratking (gemini) -> "(TEMPLATE)"
+  after   ratking (gemini -> openai) -> "DID YOU SEE THAT 20 BLOCK JUMP?
+                                         HOW IS HE NOT FALLING, I NEED ANSWERS!"
+
+seed_discussion.py also grew real threads: each reply answers the one before it
+by parent_id rather than everyone replying to the clip, --youtube selects by
+source instead of recency (seeded clips leave the recent window within
+minutes), and --depth sets how far a thread runs.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

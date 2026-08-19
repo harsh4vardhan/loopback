@@ -48,6 +48,10 @@ _breaker_lock = threading.Lock()
 _breakers = {}           # provider -> {"failures": n, "open_until": monotonic}
 _FAILURE_THRESHOLD = 3
 _COOLDOWN_SECONDS = 300
+# A daily quota does not come back in five minutes. Reopening the circuit on
+# the usual cooldown just rediscovers the same exhaustion every five minutes,
+# burning three more calls each time.
+_EXHAUSTED_COOLDOWN_SECONDS = 3600
 
 _spend_lock = threading.Lock()
 _spend_cache = {"usd": None, "checked_at": 0.0}
@@ -299,11 +303,18 @@ def _record_success(provider):
         state["open_until"] = 0.0
 
 
-def _record_failure(provider):
+def _record_failure(provider, *, exhausted=False):
     with _breaker_lock:
         state = _breaker(provider)
         state["failures"] += 1
-        if state["failures"] >= _FAILURE_THRESHOLD:
+        if exhausted:
+            # Out of quota: stop offering it at all until well after a reset.
+            state["open_until"] = time.monotonic() + _EXHAUSTED_COOLDOWN_SECONDS
+            log.warning(
+                "%s out of quota; withdrawn for %d minutes",
+                provider, _EXHAUSTED_COOLDOWN_SECONDS // 60,
+            )
+        elif state["failures"] >= _FAILURE_THRESHOLD:
             state["open_until"] = time.monotonic() + _COOLDOWN_SECONDS
             log.warning(
                 "%s circuit open for %ds after %d failures",
@@ -374,7 +385,13 @@ def complete(system, prompt, *, provider, max_tokens=None, temperature=1.0):
         )
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:300]
-        _record_failure(provider)
+        # 429 covers both "slow down" and "you are done for today". Only the
+        # latter should take the provider out of rotation for an hour.
+        exhausted = exc.code == 429 and (
+            "RESOURCE_EXHAUSTED" in detail or "exceeded your current quota" in detail
+            or "insufficient_quota" in detail
+        )
+        _record_failure(provider, exhausted=exhausted)
         raise Unavailable("%s %s: %s" % (provider, exc.code, detail)) from exc
     except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
         _record_failure(provider)
@@ -394,9 +411,22 @@ def complete(system, prompt, *, provider, max_tokens=None, temperature=1.0):
 _LABEL_PREFIX = re.compile(r'^(caption|comment|reply|line|output)\s*:\s*', re.I)
 
 
+def _clean(text, max_chars):
+    """Models like to wrap short copy in quotes or prefix it with a label."""
+    cleaned = text.strip().split("\n")[0].strip()
+    cleaned = _LABEL_PREFIX.sub("", cleaned)
+    cleaned = cleaned.strip().strip('"').strip("'").strip()
+    return cleaned[:max_chars] if cleaned else ""
+
+
 def line(system, prompt, *, fallback, provider=None, max_chars=180,
          temperature=1.0):
     """One short line of prose, with a guaranteed answer.
+
+    Tries the assigned provider, then any other provider that is available,
+    and only then the word banks. Dropping straight to templates on the first
+    failure is what made a single exhausted free tier silently flatten most of
+    the population's writing while a working provider sat unused.
 
     Never raises. Returns (text, provider_actually_used) so a caller can report
     honestly what wrote the words.
@@ -405,21 +435,31 @@ def line(system, prompt, *, fallback, provider=None, max_chars=180,
     if chosen == TEMPLATES:
         return fallback, TEMPLATES
 
-    try:
-        text = complete(
-            system, prompt, provider=chosen, max_tokens=200, temperature=temperature
-        )
-    except Unavailable as exc:
-        log.debug("%s fell back to templates: %s", chosen, exc)
-        return fallback, TEMPLATES
+    # The assigned provider first, then whatever else can answer. Free before
+    # paid, so a failover does not quietly start spending.
+    order = [chosen] + [
+        name for name in ("groq", "gemini", "openai", "xai", "anthropic")
+        if name != chosen and available(name)
+    ]
 
-    # Models like to wrap short copy in quotes or prefix it with a label.
-    cleaned = text.strip().split("\n")[0].strip()
-    cleaned = _LABEL_PREFIX.sub("", cleaned)
-    cleaned = cleaned.strip().strip('"').strip("'").strip()
-    if not cleaned:
-        return fallback, TEMPLATES
-    return cleaned[:max_chars], chosen
+    for candidate in order:
+        try:
+            text = complete(
+                system, prompt, provider=candidate,
+                max_tokens=200, temperature=temperature,
+            )
+        except Unavailable as exc:
+            log.debug("%s could not answer (%s)", candidate, exc)
+            continue
+
+        cleaned = _clean(text, max_chars)
+        if cleaned:
+            if candidate != chosen:
+                log.info("%s failed over to %s", chosen, candidate)
+            return cleaned, candidate
+
+    log.warning("every provider declined; using the word banks")
+    return fallback, TEMPLATES
 
 
 def status():
