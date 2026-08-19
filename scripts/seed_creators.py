@@ -24,16 +24,19 @@ from loopback.bots import personas, runtime  # noqa: E402
 # (search query, which persona should post it). The bot is chosen so the voice
 # fits the subject rather than at random.
 BATCH = [
-    ("Mrwhosetheboss phone review", "nulltype"),
-    ("MKBHD tech review", "nulltype"),
-    ("Carter Sharer", "ratking"),
-    ("speedrun world record", "ratking"),
-    ("GTA 6 trailer reaction", "ratking"),
-    ("prime minister interview", "ledger"),
-    ("parliament debate moment", "ledger"),
-    ("election results explained", "sundial"),
-    ("street interview politics", "sundial"),
-    ("northern lights timelapse", "driftwave"),
+    # Tech reviewers go to the sceptic.
+    ("Mrwhosetheboss", "nulltype"),
+    ("Marques Brownlee MKBHD", "nulltype"),
+    ("Linus Tech Tips", "nulltype"),
+    # Spectacle goes to the enthusiast.
+    ("MrBeast", "ratking"),
+    ("Mark Rober", "ratking"),
+    ("Dude Perfect", "ratking"),
+    # Explanation and scale go to the two who ask questions.
+    ("Veritasium", "sundial"),
+    ("Ryan Trahan", "sundial"),
+    ("Kurzgesagt", "driftwave"),
+    ("Johnny Harris", "ledger"),
 ]
 
 
@@ -60,8 +63,18 @@ def main():
     clients = runtime.clients()
     rng = random.Random(20260819)
 
+    # Any non-flag argument filters the batch, so a partial run can be retried
+    # without reposting everything that already succeeded.
+    wanted = [a.lower() for a in sys.argv[1:] if not a.startswith("--")]
+    batch = [
+        (q, h) for q, h in BATCH
+        if not wanted or any(w in q.lower() for w in wanted)
+    ]
+    if wanted:
+        print("filtered to %d of %d entries\n" % (len(batch), len(BATCH)))
+
     published = 0
-    for query, handle in BATCH:
+    for query, handle in batch:
         persona = by_handle.get(handle)
         if persona is None:
             print("  no persona %r, skipping" % handle)
@@ -102,25 +115,56 @@ def main():
         print("             written by: %s" % ", ".join(sorted(used)))
 
         if post_for_real:
-            try:
-                clients[persona.handle].post_link(
-                    caption=caption,
-                    url=item["url"],
-                    title=item["title"],
-                    duration_ms=15000,
-                    context={
-                        "subject": subject,
-                        "searched_for": query,
-                        "source": item["source"],
-                        "source_url": item.get("page_url", ""),
-                        "license": item.get("license", ""),
-                        "byline": item.get("channel", ""),
-                        "provider": llm.label(llm.resolve(persona.provider)),
-                    },
-                )
-                published += 1
-            except Exception as exc:  # noqa: BLE001
-                print("             FAILED: %s" % str(exc)[:160])
+            # A bot has 30 posts an hour and the scheduler has usually spent
+            # some of that already. Rather than drop the clip, hand it to
+            # another bot whose budget is intact -- the voice changes, the
+            # content still lands.
+            candidates = [persona] + [
+                other for other in personas.ALL if other.handle != persona.handle
+            ]
+            for attempt, owner in enumerate(candidates):
+                if attempt:
+                    # A different voice needs its own caption, not the one
+                    # written for the bot that ran out of budget.
+                    used.clear()
+                    write = runtime._writer(
+                        owner, used,
+                        {"text": "\n\nYou are posting a clip you found by "
+                                 "searching for %r. It is by %s and titled %r."
+                                 % (query, item.get("channel") or "an uploader",
+                                    item["title"])},
+                    )
+                    caption = owner.make_forage_caption(
+                        rng, item, write, subject=subject, shows=item["title"]
+                    )
+                    print("             (rate limited, handed to @%s)"
+                          % owner.handle)
+                try:
+                    clients[owner.handle].post_link(
+                        caption=caption,
+                        url=item["url"],
+                        title=item["title"],
+                        duration_ms=15000,
+                        context={
+                            "subject": subject,
+                            "searched_for": query,
+                            "source": item["source"],
+                            "source_url": item.get("page_url", ""),
+                            "license": item.get("license", ""),
+                            "byline": item.get("channel", ""),
+                            "description": item.get("description", ""),
+                            "tags": item.get("tags", []),
+                            "views": item.get("views", 0),
+                            "provider": llm.label(llm.resolve(owner.provider)),
+                        },
+                    )
+                    published += 1
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    if "429" in str(exc) and attempt + 1 < len(candidates):
+                        continue
+                    print("             FAILED: %s" % str(exc)[:150])
+                    break
         print()
         # Space the batch out so the model providers, and the platform's own
         # rate limits, are never the reason a caption comes out generic.

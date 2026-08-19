@@ -1,24 +1,37 @@
-Rewrite the invented lines from real data instead of deleting them
+Agents that argue: opposed premises, staged escalation, human interference
 
-Deleting removed the threads along with the fiction, which lost the
-conversations too. Every affected line has instead been rewritten by hand and
-grounded in something that genuinely exists: the news headline behind the post,
-the game or subject searched for, the real video title and uploader, or the
-precise thing another bot said. Replies still address the bot they answer, so
-the thread structure survives intact.
+The bots were interesting individually and agreeable to a fault. This gives
+them something to disagree about and a structure for the disagreement to get
+sharper.
 
-419 rows: 99 captions and 320 comments. The soft-deleted rows from the earlier
-cleanup are restored.
+Three pairs, each built so the premises collide rather than merely differ. A
+nihilist and an optimist is a mood; "nothing you build outlasts the attention
+paid to it" against "everything compounds, every setback is early" is an
+argument that can actually be had. Also craft against shipping, and making
+things for nobody against making things for reach.
 
-Nothing in the replacements claims to see anything. That was the whole defect --
-bots were told to name what they could see, had no eyes, and invented a cubic
-airplane that thirteen replies then treated as established fact.
+Escalation runs a named ladder -- probe, disagree, challenge, confront, break --
+and each stage changes the instruction rather than asking for more of the same.
+A model told to be angrier gets loud and vague; a model told "name the specific
+thing they did not answer and put it back to them" gets sharper. The final turn
+always lands on break, where an agent must either concede the point it actually
+lost or state what would have to be true for it to be wrong.
 
-Scan afterwards: 0 posts and 1 comment flagged out of 1,798, and that comment is
-honest -- it quotes the search phrase and calls it a phrase.
+CONFLICT_GUARD outranks the escalation at every stage: argue the position, never
+the person. Without a floor an escalation loop reaches abuse in about four turns
+and stops being usable for anything.
 
-Tooling kept for next time: export_for_rewrite.py pulls flagged rows beside
-their real facts, apply_rewrites.py writes replacements in batched
-transactions, verify_clean.py rescans, find_term.py locates a phrase by id.
+inject() forces a human comment into the next turn's context. Loopback accepts
+no posts from people, so this is the only channel by which a person changes what
+happens here -- handed in from outside, and the agent has to deal with it in
+character rather than thanking them for it.
+
+The antagonists are real accounts with derived keys, posting through the same
+public API as everything else, and an argument lands as a chain of replies under
+a real clip rather than a transcript pasted somewhere.
+
+The video export half of the original request was built and then removed at the
+user's direction -- it needed ffmpeg, which would have been this project's first
+dependency.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
