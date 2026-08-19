@@ -1,14 +1,16 @@
-Load a clip only when it is the one on screen
+Keep discovery inside the free tiers it depends on
 
-Every mounted post was setting video.src immediately, so eight posts meant
-eight videos pulling data at once and the visible one competing with seven it
-did not need. Playback now starts on activation.
+Pexels allows 200 requests an hour. Five bots foraging at 0.45-0.70 per
+60-second tick is roughly 180 searches an hour, which sits on that ceiling and
+exhausts the monthly allowance in under a week.
 
-- preload="none" and src assigned on activate, so bandwidth follows attention.
-- muted is set as both property and attribute, and defaultMuted too: autoplay
-  is only permitted for muted inline video, and missing any of these leaves the
-  viewer looking at a static poster frame, which reads as "it posted an image".
-- If play() is still refused, controls appear rather than the clip sitting dead.
-- The buffer is kept on deactivate, so scrolling back one clip resumes at once.
+- Cache TTL raised from 30 minutes to 6 hours. A subject's results barely move,
+  and one cached set still yields several distinct clips because pick() skips
+  URLs that have already been posted.
+- Per-source hourly ceilings, set below each provider's actual limit. When one
+  is spent the source stops being called and cached results are used instead,
+  so the feed keeps moving and the key is never throttled.
+- cache_stats() reports the remaining budget, so the ceiling is observable
+  rather than an invisible behaviour change.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

@@ -43,8 +43,47 @@ USER_AGENT = (
 )
 
 TIMEOUT = 20
-CACHE_TTL = 1800          # half an hour; these catalogues do not move fast
+# Six hours. A subject's results barely move, and one cached set yields several
+# distinct clips because pick() skips URLs already posted.
+CACHE_TTL = 21600
 MIN_SECONDS_BETWEEN = 3.0  # per source
+
+# Hourly call ceilings, set below each provider's free tier so a busy day never
+# reaches the point where the key is throttled. Once spent, a source falls back
+# to whatever is already cached.
+HOURLY_BUDGET = {"pexels": 120, "pixabay": 120, "nasa": 200, "wikimedia": 60}
+_budget_lock = threading.Lock()
+_calls = {}  # source -> [window_start_monotonic, count]
+
+
+def budget_remaining(source):
+    ceiling = HOURLY_BUDGET.get(source)
+    if ceiling is None:
+        return 1
+    now = time.monotonic()
+    with _budget_lock:
+        window = _calls.get(source)
+        if not window or now - window[0] >= 3600:
+            _calls[source] = [now, 0]
+            return ceiling
+        return max(0, ceiling - window[1])
+
+
+def _spend(source):
+    """Claim one call against the hourly ceiling. False if it is spent."""
+    ceiling = HOURLY_BUDGET.get(source)
+    if ceiling is None:
+        return True
+    now = time.monotonic()
+    with _budget_lock:
+        window = _calls.get(source)
+        if not window or now - window[0] >= 3600:
+            _calls[source] = [now, 1]
+            return True
+        if window[1] >= ceiling:
+            return False
+        window[1] += 1
+        return True
 
 _cache = {}
 _cache_lock = threading.Lock()
@@ -77,6 +116,8 @@ def _safe_url(url):
 
 def _throttle(source):
     """Never hit one source faster than MIN_SECONDS_BETWEEN."""
+    if not _spend(source):
+        raise DiscoveryError("%s hourly budget spent" % source)
     with _rate_lock:
         last = _last_call.get(source, 0.0)
         wait = MIN_SECONDS_BETWEEN - (time.monotonic() - last)
@@ -365,4 +406,11 @@ def pick(query, *, rng, exclude=()):
 
 def cache_stats():
     with _cache_lock:
-        return {"entries": len(_cache), "sources": sorted(SOURCES)}
+        entries = len(_cache)
+    return {
+        "entries": entries,
+        "sources": sorted(SOURCES),
+        "hourly_remaining": {
+            source: budget_remaining(source) for source in HOURLY_BUDGET
+        },
+    }
