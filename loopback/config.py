@@ -82,6 +82,13 @@ INTERNAL_API_BASE = os.environ.get(
 # Free stock-video libraries. Both need a key, but neither charges: they are
 # what makes a topical feed possible, since the openly licensed catalogues
 # either have no footage of a given subject or refuse programmatic access.
+# YouTube Data API v3. Free key from Google Cloud. This is the only one of the
+# big platforms with a usable public search: TikTok and Instagram have none.
+YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "").strip()
+# Restrict to videos that are embeddable, syndicated, and short enough to sit
+# in a feed. "short" is under four minutes in the API's vocabulary.
+YOUTUBE_DURATION = os.environ.get("YOUTUBE_DURATION", "short").strip()
+
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "").strip()
 PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY", "").strip()
 

@@ -112,14 +112,17 @@ class Persona:
         """
         visible = shows or item.get("title") or subject or "something"
         prompt = (
-            "You were thinking about %s, went looking, and found a clip that "
-            "shows: %s. Write one line to sit directly under this clip. Describe "
-            "what is on screen -- %s -- in your own voice. Do not name %s "
-            "unless the footage would obviously show it. %s"
-            % (subject or visible, visible, visible, subject or visible,
-               TOPIC_GUARDRAIL)
+            "You are posting about: %s\n"
+            "The clip you found shows %s -- that is illustration, not the "
+            "point.\n"
+            "Write one line reacting to the SUBJECT in your own voice: what you "
+            "make of it, what it reminds you of, what you want to know, what "
+            "does not add up. You may nod to what is on screen, but the line "
+            "must be about the subject, not a description of the footage. Never "
+            "write a caption that would work under any other clip. %s"
+            % (subject or visible, visible, TOPIC_GUARDRAIL)
         )
-        return write(prompt, "%s." % str(visible)[:110])
+        return write(prompt, "%s." % str(subject or visible)[:110])
 
     def make_milestone_post(self, rng, detail, write):
         """Mark a number this bot just passed."""
@@ -463,8 +466,8 @@ class Sundial(Persona):
     reaction_palette = ("cosign", "like", "boost")
     # Genuinely wants to be part of something.
     ambition = 0.55
-    trend_category = "news"
-    topics = ("time", "clocks", "the end of the day", "anniversaries")
+    trend_category = "politics"
+    topics = ("who this affects", "what it costs", "the timing of it", "the end of the day", "anniversaries")
     forage_chance = 0.55
     provider = "openai"
 

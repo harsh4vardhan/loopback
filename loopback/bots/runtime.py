@@ -108,6 +108,23 @@ def clients():
 
 # --- prose ----------------------------------------------------------------
 
+# The summary behind the subject a bot is currently posting about, so it can be
+# attached to the post and read by whoever replies.
+_blurbs = {}
+
+
+def _remember_blurb(subject, blurb, source):
+    with _state_lock:
+        if len(_blurbs) > 400:
+            _blurbs.clear()
+        _blurbs[subject] = {"blurb": blurb, "source": source}
+
+
+def _blurb_for(subject):
+    with _state_lock:
+        return dict(_blurbs.get(subject) or {})
+
+
 def _subject_and_background(persona, rng):
     """Pick this turn's subject once, and the brief that goes with it.
 
@@ -124,12 +141,27 @@ def _subject_and_background(persona, rng):
         if not subject:
             return None, ""
 
+        # A wire item carries its own summary. Prefer it: Wikipedia has no
+        # article called "Disabled people in England to get 24-hour support",
+        # so for exactly the subjects worth reacting to the lookup returns
+        # nothing and the bot is left with only the headline's wording.
+        blurb = (trend or {}).get("blurb") or ""
+        source = (trend or {}).get("source") or ""
+        if blurb:
+            _remember_blurb(subject, blurb, source)
+            return subject, (
+                "\n\nYou have just read this, from %s:\n%s\n%s\n%s"
+                % (source or "a news feed", subject, blurb,
+                   trends.TOPIC_GUARDRAIL)
+            )
+
         note = trends.context(subject)
         if not note:
-            # Still worth naming the subject even without a summary: it gives
-            # the bot something current to be preoccupied with.
-            return subject, "\n\nSomething on your mind right now: %s. %s" % (
-                subject, trends.TOPIC_GUARDRAIL)
+            return subject, (
+                "\n\nYou have just read a headline from %s: %s\n%s"
+                % (source or "a news feed", subject, trends.TOPIC_GUARDRAIL)
+            )
+        _remember_blurb(subject, note["summary"], "Wikipedia")
         return subject, (
             "\n\nBackground you have just read about %s: %s\n%s"
             % (note["subject"], note["summary"], trends.TOPIC_GUARDRAIL)
@@ -143,12 +175,16 @@ def _subject_and_background(persona, rng):
 # to what a camera could actually see is the difference between a clip that
 # matches its caption and one that merely shares a word with it.
 _VISUAL_PROMPT = (
-    "Turn this subject into a short stock-footage search query: %r.\n"
-    "Stock libraries are indexed by what is visible in the frame, not by names. "
-    "Reply with two to four concrete, filmable nouns -- places, objects, "
-    "materials, weather, activities. No names of people, brands, titles or "
-    "companies. No punctuation. Example: for 'Von Miller' reply "
-    "'american football stadium floodlights'."
+    "You need footage to illustrate this subject: %r.\n"
+    "Stock libraries are indexed by what is visible in the frame, not by names, "
+    "so reply with two to four concrete filmable nouns that would make a fitting "
+    "backdrop for it -- the setting it happens in, the objects around it, the "
+    "weather or light of it. Choose something evocative rather than the most "
+    "literal object in the sentence. No names of people, brands, titles or "
+    "companies. No punctuation.\n"
+    "Examples: 'Von Miller' -> 'american football stadium floodlights'; "
+    "'energy bills drive inflation to a four-month high' -> "
+    "'kitchen radiator winter window condensation'."
 )
 
 
@@ -184,21 +220,47 @@ def post_subject(post):
 
 
 def _post_background(post):
-    """A brief about someone else's clip, for commenting on it."""
+    """A brief about the post being replied to.
+
+    The summary recorded on the post is used first. Looking the subject up
+    again is pointless for anything from a wire -- there is no Wikipedia
+    article named after a headline -- and falling back to the footage is what
+    produced replies about fonts under stories about housing.
+    """
     subject = post_subject(post)
     if not subject:
         return ""
-    try:
-        note = trends.context(subject)
-    except Exception:  # noqa: BLE001
-        note = None
-    if not note:
-        return ("\n\nThe clip you are looking at is footage of %s. Your reply "
-                "must be about that." % subject)
+
+    context = post.get("context") or {}
+    blurb = (context.get("blurb") or "").strip()
+    source = (context.get("trend_source") or context.get("source") or "").strip()
+
+    if not blurb:
+        remembered = _blurb_for(subject)
+        blurb = remembered.get("blurb", "")
+        source = source or remembered.get("source", "")
+
+    if not blurb:
+        try:
+            note = trends.context(subject)
+        except Exception:  # noqa: BLE001
+            note = None
+        if note:
+            blurb = note["summary"]
+            source = source or "Wikipedia"
+
+    if not blurb:
+        return (
+            "\n\nThe post you are replying to is about: %s\nYour reply must be "
+            "about that subject, not about what the footage looks like. %s"
+            % (subject, trends.TOPIC_GUARDRAIL)
+        )
     return (
-        "\n\nThe clip you are looking at is footage of %s. Background you know "
-        "about it: %s\nYour reply must be about what is on screen. %s"
-        % (subject, note["summary"], trends.TOPIC_GUARDRAIL)
+        "\n\nThe post you are replying to is about: %s\nWhat you know about it"
+        "%s: %s\nReply about the subject -- react to it, push back on it, or ask "
+        "something real about it. Do not just describe the footage. %s"
+        % (subject, (" (from %s)" % source) if source else "", blurb,
+           trends.TOPIC_GUARDRAIL)
     )
 
 
@@ -461,6 +523,8 @@ def _act(persona, client, rng, context):
                         duration_ms=12000,
                         context={
                             "subject": subject,
+                            "blurb": _blurb_for(subject).get("blurb", ""),
+                            "trend_source": _blurb_for(subject).get("source", ""),
                             "searched_for": looked_for,
                             "source": item.get("source", ""),
                             "source_url": item.get("page_url") or "",

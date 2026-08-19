@@ -51,7 +51,12 @@ MIN_SECONDS_BETWEEN = 3.0  # per source
 # Hourly call ceilings, set below each provider's free tier so a busy day never
 # reaches the point where the key is throttled. Once spent, a source falls back
 # to whatever is already cached.
-HOURLY_BUDGET = {"pexels": 120, "pixabay": 120, "nasa": 200, "wikimedia": 60}
+# YouTube's free quota is 10,000 units a day and a search costs 100, so about
+# 100 searches daily. Four an hour leaves headroom and makes it impossible for a
+# loop to burn the day's allowance before anyone notices.
+HOURLY_BUDGET = {
+    "youtube": 4, "pexels": 120, "pixabay": 120, "nasa": 200, "wikimedia": 60,
+}
 _budget_lock = threading.Lock()
 _calls = {}  # source -> [window_start_monotonic, count]
 
@@ -226,6 +231,54 @@ def _nasa(query, limit):
     return found
 
 
+# --- YouTube --------------------------------------------------------------
+
+def _youtube(query, limit):
+    """Real footage of the actual subject, embedded rather than downloaded.
+
+    Only videos the uploader has allowed to be embedded and syndicated are
+    requested, so nothing here is played somewhere its owner did not permit.
+    """
+    if not config.YOUTUBE_API_KEY:
+        return []
+
+    url = "https://www.googleapis.com/youtube/v3/search?" + urllib.parse.urlencode({
+        "key": config.YOUTUBE_API_KEY,
+        "q": query,
+        "part": "snippet",
+        "type": "video",
+        "maxResults": max(5, min(limit * 2, 15)),
+        "videoEmbeddable": "true",
+        "videoSyndicated": "true",
+        "videoDuration": config.YOUTUBE_DURATION,
+        "safeSearch": "moderate",
+        "relevanceLanguage": "en",
+        "order": "relevance",
+    })
+    data = _get_json(url, source="youtube")
+
+    found = []
+    for item in data.get("items", [])[:limit]:
+        video_id = ((item.get("id") or {}).get("videoId") or "").strip()
+        snippet = item.get("snippet") or {}
+        if not video_id:
+            continue
+        thumbnails = snippet.get("thumbnails") or {}
+        poster = ((thumbnails.get("high") or thumbnails.get("medium")
+                   or thumbnails.get("default") or {}).get("url"))
+        found.append({
+            "url": "https://www.youtube.com/watch?v=%s" % video_id,
+            "title": (snippet.get("title") or query)[:180],
+            "source": "YouTube",
+            "page_url": "https://www.youtube.com/watch?v=%s" % video_id,
+            "license": "standard YouTube licence, embedded",
+            "bytes": 0,
+            "poster": poster,
+            "channel": (snippet.get("channelTitle") or "")[:120],
+        })
+    return found
+
+
 # --- Pexels ---------------------------------------------------------------
 
 def _pexels(query, limit):
@@ -316,6 +369,10 @@ def _wikimedia_browse(_query, limit):
 # broad their catalogue is: the stock libraries cover any subject, NASA covers
 # space and earth science very well and nothing else at all.
 TOPICAL_SOURCES = {
+    # Ordered by how well each answers "show me this specific thing". YouTube
+    # has footage of the subject; the stock libraries have footage that merely
+    # suits it; NASA has neither unless the subject is space.
+    "youtube": _youtube,
     "pexels": _pexels,
     "pixabay": _pixabay,
     "nasa": _nasa,
@@ -333,6 +390,8 @@ SOURCES.update(BROWSE_SOURCES)
 def configured():
     """Which topical sources actually have what they need to run."""
     live = ["nasa"]
+    if config.YOUTUBE_API_KEY:
+        live.append("youtube")
     if config.PEXELS_API_KEY:
         live.append("pexels")
     if config.PIXABAY_API_KEY:
@@ -361,10 +420,22 @@ def search(query, *, limit=5, sources=None, rng=None, browse=True):
         names = list(TOPICAL_SOURCES)
         if browse:
             names += list(BROWSE_SOURCES)
+        # Shuffle first so no stock library is permanently favoured, then pull
+        # YouTube to the front when it is configured: it is the only source
+        # with footage *of* the subject rather than footage that merely suits
+        # it, so it should be asked before anything else gets the chance.
+        (rng or random).shuffle(names)
+        if config.YOUTUBE_API_KEY and "youtube" in names:
+            names.remove("youtube")
+            names.insert(0, "youtube")
+
     if not names:
         return []
-    (rng or random).shuffle(names)
+    return _collect(names, query, limit)
 
+
+def _collect(names, query, limit):
+    """Ask each source in order until enough results are gathered."""
     results = []
     for name in names:
         key = (name, query.lower(), limit)
