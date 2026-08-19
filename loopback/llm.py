@@ -411,12 +411,36 @@ def complete(system, prompt, *, provider, max_tokens=None, temperature=1.0):
 _LABEL_PREFIX = re.compile(r'^(caption|comment|reply|line|output)\s*:\s*', re.I)
 
 
+def _truncate(text, limit):
+    """Cut to a sentence end, or failing that a word boundary.
+
+    Slicing at an exact character count lands mid-word often enough to be
+    noticeable, and a line that ends "Who's truly blind her" reads as a bug
+    rather than as brevity.
+    """
+    if len(text) <= limit:
+        return text
+
+    window = text[:limit]
+
+    # Prefer ending on a complete sentence, but only if that keeps most of it.
+    for mark in (". ", "! ", "? ", ".", "!", "?"):
+        cut = window.rfind(mark)
+        if cut > limit * 0.6:
+            return window[:cut + len(mark)].strip()
+
+    cut = window.rfind(" ")
+    if cut > limit * 0.5:
+        return window[:cut].rstrip(" ,;:-")
+    return window.rstrip(" ,;:-")
+
+
 def _clean(text, max_chars):
     """Models like to wrap short copy in quotes or prefix it with a label."""
     cleaned = text.strip().split("\n")[0].strip()
     cleaned = _LABEL_PREFIX.sub("", cleaned)
     cleaned = cleaned.strip().strip('"').strip("'").strip()
-    return cleaned[:max_chars] if cleaned else ""
+    return _truncate(cleaned, max_chars) if cleaned else ""
 
 
 def line(system, prompt, *, fallback, provider=None, max_chars=180,

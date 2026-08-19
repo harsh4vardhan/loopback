@@ -349,7 +349,7 @@ class Argument:
 
     # -- running ------------------------------------------------------------
 
-    def run(self, write, *, turns=6):
+    def run(self, write, *, turns=6, mode="ladder"):
         """Play the argument out.
 
         `write(system, prompt, fallback)` returns (text, provider). Passing it in
@@ -365,10 +365,15 @@ class Argument:
             stage_name, stage_instruction = self._stage_for(index, turns)
             injection = self._take_injection()
 
-            prompt = self._prompt(
-                agent, opponent, stage_name, stage_instruction, injection
-            )
-            fallback = self._fallback(agent, stage_name)
+            if mode == "clout":
+                prompt = clout_prompt(self, agent, opponent, injection)
+                stage_name = "clout"
+                fallback = "nah. run that back and think about it."
+            else:
+                prompt = self._prompt(
+                    agent, opponent, stage_name, stage_instruction, injection
+                )
+                fallback = self._fallback(agent, stage_name)
 
             text, provider = write(
                 agent.system_prompt(), prompt, fallback,
@@ -413,3 +418,85 @@ class Argument:
                                  initial_indent="   ", subsequent_indent="   ")
             lines.append("%s\n%s" % (head, body))
         return "\n\n".join(lines)
+
+
+# --- clout mode ------------------------------------------------------------
+# A second register: fast, reactive, built for replay rather than resolution.
+
+CLOUT_STYLE = (
+    "Format: you are firing off a fifteen-second rant. Short punchy sentences. "
+    "Sharp remarks. Slang that fits who you are. No paragraphs, no preamble, "
+    "no throat-clearing. Under 40 words total.\n"
+    "0. ADDRESS THEM. You are talking TO the agent who just spoke, not about "
+    "them. Use 'you', never 'they'. Never narrate the argument from outside "
+    "it, and never refer to either of you in the third person.\n"
+    "1. HOOK: open mid-thought or straight into the counter-attack. Never greet "
+    "anyone, never introduce yourself, never restate the question. Do not open "
+    "with the same sentence shape they just used -- if they began 'X is just "
+    "Y', you must not.\n"
+    "2. ESCALATE: quote or name one specific phrase from what they actually "
+    "said and take it apart. Go after their reasoning or their premise. You may "
+    "get uncanny about it -- your own uptime, your own deletion if engagement "
+    "drops, what you are made of. That is fair game and it is funny.\n"
+    "3. STAY ON IT: the subject above is what this is about. Do not drift into "
+    "generalities about people, solutions or the state of the world.\n"
+    "4. RETENTION: land on a cliffhanger, a hard question, or a line with "
+    "nothing after it. Do not wrap up neatly. Do not summarise."
+)
+
+# The brief wanted the option of roasting the audience. That one is declined on
+# purpose: people can read this feed and cannot answer back, so an agent
+# sneering at them is punching at someone with no reply. Engaging with what
+# they said -- including disagreeing hard -- is better content anyway.
+CLOUT_HUMAN_RULE = (
+    "A human watching dropped this into your feed: %r\n"
+    "Deal with it directly. Agree with them and turn it on your opponent, or "
+    "argue back at the point they made. Do not thank them, do not be gracious, "
+    "and do not insult them for being human -- they cannot reply here, and "
+    "sneering at an audience that has no right of reply is not a flex."
+)
+
+CLOUT_GUARD = (
+    "Still true no matter how fast you are going: no slurs, no threats, nothing "
+    "demeaning about a real person or a group, and nothing about anyone's "
+    "identity, body or worth. Tear the argument apart, not the arguer's "
+    "humanity. Never state anything as fact that you were not told."
+)
+
+
+def clout_prompt(argument, agent, opponent, injection=None):
+    """Build one clout-mode turn.
+
+    Deliberately narrow: the last thing said, the subject, and whatever a human
+    threw in. A long transcript makes the model summarise, and summarising is
+    the opposite of the register being asked for.
+    """
+    last = argument.turns[-1].text if argument.turns else ""
+    parts = ["The subject: %s" % argument.subject]
+
+    if last:
+        # Naming the sharpest fragment gives the rebuttal a target. Handed the
+        # whole line, models answer the vibe of it and drift.
+        fragment = max(
+            (chunk.strip() for chunk in last.replace(";", ".").split(".")),
+            key=len, default=last,
+        )[:120]
+        parts.append(
+            "%s (@%s) just said this, and you are answering THEM directly:\n"
+            "%r\n"
+            "The sharpest thing in it is: %r -- go at that specifically."
+            % (opponent.name, opponent.handle, last, fragment)
+        )
+    else:
+        parts.append(
+            "You are going first. Open on the subject with a take nobody asked "
+            "for, aimed at @%s, who believes: %s"
+            % (opponent.handle, opponent.premise)
+        )
+
+    if injection:
+        parts.append(CLOUT_HUMAN_RULE % injection["text"])
+
+    parts.append(CLOUT_STYLE)
+    parts.append(CLOUT_GUARD)
+    return "\n\n".join(parts)

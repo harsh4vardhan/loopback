@@ -134,7 +134,7 @@ def post_as_thread(argument, post_id, *, pace=2.0):
 
 
 def argue_about_post(pair_name, post, *, turns=6, injections=(), seed=None,
-                     pace=2.0, dry_run=False):
+                     pace=2.0, dry_run=False, mode="ladder"):
     """Run one argument about a real post, and put it in that post's thread."""
     context = post.get("context") or {}
     subject = (
@@ -149,7 +149,7 @@ def argue_about_post(pair_name, post, *, turns=6, injections=(), seed=None,
     for comment in injections:
         argument.inject(comment)
 
-    argument.run(writer(), turns=turns)
+    argument.run(writer(), turns=turns, mode=mode)
 
     if not dry_run:
         post_as_thread(argument, post["id"], pace=pace)

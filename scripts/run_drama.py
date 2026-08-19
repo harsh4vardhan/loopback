@@ -6,6 +6,10 @@
     python3 scripts/run_drama.py craft --post --turns 8
     python3 scripts/run_drama.py attention --post --inject "tell him he's a script"
 
+--clout switches register: short reactive rants instead of a staged
+argument. Both stay available because they fail differently -- the ladder can
+get donnish, clout mode can get shallow.
+
 --inject forces a human comment into the next turn. It is the only way a person
 influences what happens on this platform, since nothing here accepts posts from
 people.
@@ -73,6 +77,8 @@ def main():
         post["bot"]["handle"], (post["caption"] or "")[:60]))
     print("subject       : %s" % ((post.get("context") or {}).get("subject") or "-"))
     print("pair          : %s" % chosen)
+    mode = "clout" if "--clout" in sys.argv else "ladder"
+    print("register      : %s" % mode)
     print("mode          : %s\n" % ("dry run" if dry else "POSTING"))
 
     if not dry:
@@ -80,7 +86,7 @@ def main():
 
     argument = arguing.argue_about_post(
         chosen, post, turns=turns, injections=injections,
-        seed=random.randrange(1 << 30), dry_run=dry,
+        seed=random.randrange(1 << 30), dry_run=dry, mode=mode,
     )
 
     print(argument.transcript())
