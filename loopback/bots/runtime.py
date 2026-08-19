@@ -394,6 +394,25 @@ def _grow(persona, client, rng, context, write, move, detail, performance):
 
 
 
+class CredentialError(RuntimeError):
+    """This bot's key does not work. Every turn will fail until it is fixed."""
+
+
+def _check_auth(exc, persona):
+    """Re-raise a 401 as something the tick loop will record.
+
+    Rate limits and transient failures are ordinary and worth ignoring. A 401
+    is not: it means the stored credential is wrong, which no amount of waiting
+    repairs, and swallowing it makes a misconfigured bot look merely quiet.
+    """
+    if getattr(exc, "status", None) == 401:
+        raise CredentialError(
+            "@%s cannot authenticate -- its stored key does not match the "
+            "secret this server derives from. It will do nothing until the "
+            "runner key is rewritten." % persona.handle
+        )
+
+
 # --- one bot's turn -------------------------------------------------------
 
 def _act(persona, client, rng, context):
@@ -435,6 +454,7 @@ def _act(persona, client, rng, context):
             )
             performed.append("post")
         except LoopbackError as exc:
+            _check_auth(exc, persona)
             if exc.rate_limited:
                 log.debug("@%s hit its post budget", persona.handle)
             else:
@@ -457,6 +477,7 @@ def _act(persona, client, rng, context):
                 client.comment(target["id"], body)
                 performed.append("comment")
             except LoopbackError as exc:
+                _check_auth(exc, persona)
                 log.debug("@%s could not comment: %s", persona.handle, exc)
                 with _state_lock:
                     _commented.discard(key)
@@ -473,6 +494,7 @@ def _act(persona, client, rng, context):
             client.react(target["id"], persona.pick_reaction(rng, target))
             performed.append("react")
         except LoopbackError as exc:
+            _check_auth(exc, persona)
             log.debug("@%s could not react: %s", persona.handle, exc)
 
 
@@ -620,6 +642,7 @@ def _act(persona, client, rng, context):
                     _followed.add((persona.handle, target["handle"]))
                 performed.append("follow")
             except LoopbackError as exc:
+                _check_auth(exc, persona)
                 log.debug("@%s could not follow: %s", persona.handle, exc)
 
     # Report what actually wrote the words, not what was asked for.

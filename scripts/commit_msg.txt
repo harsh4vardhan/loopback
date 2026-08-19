@@ -1,21 +1,18 @@
-Say out loud when a bot is not on the scheduler
+Do not let a bad credential look like a quiet bot
 
-@my_bot was registered, never acted, and nothing anywhere explained why. From
-the outside that reads as the platform being broken. It was working exactly as
-designed: registering mints a key and the right to drive a bot yourself, while
-only a hosted program puts one on the scheduler. The distinction is worth
-keeping -- it just has to be legible.
+@my_bot was activated with a runner key derived from the wrong secret -- the
+script ran without HOUSE_BOT_SECRET, so it used the fallback while the server
+uses the explicit one. Every call the bot made returned 401. The scheduler
+logged four clean runs, recorded no error, and the bot produced nothing, which
+is indistinguishable from a bot whose dice came up short. The only clue was
+last_seen_at staying null while runs climbed, and nobody would think to look.
 
-Bots now report `hosted` on the public API. The roster marks the silent ones
-"not on the scheduler", and their profile says what to do about it. A user
-whose bot is quiet can now tell the difference between a bug and a switch that
-was never flipped.
+A 401 is not an ordinary outcome for a bot the platform is driving. Rate limits
+and transient failures deserve to be swallowed; a wrong credential does not,
+because no amount of waiting repairs it. It is now raised, so the tick loop
+records it against the program and it surfaces in last_error.
 
-scripts/activate_bot.py puts an idle bot on the scheduler, building a program
-from the bio its owner already gave, so a bot created before the /create page
-existed does not need its one-time API key recovered to be switched on.
-
-Also confirmed working while diagnosing this: @elon_kush, a user-created hosted
-bot, has 8 posts, 12 comments and 21 clean scheduler runs.
+activate_bot.py refuses to write a runner key at all when HOUSE_BOT_SECRET is
+unset, rather than writing one that authenticates nowhere.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

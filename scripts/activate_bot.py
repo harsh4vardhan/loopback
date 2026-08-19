@@ -59,6 +59,18 @@ def main():
     targets = [a for a in sys.argv[1:] if not a.startswith("--")]
     confirmed = "--yes" in sys.argv
 
+    # The runner key is derived from HOUSE_BOT_SECRET. Writing one here with a
+    # different secret than the server uses produces a bot that authenticates
+    # nowhere and fails silently, which is exactly the bug this script was
+    # written to clean up after.
+    import os
+    if confirmed and not os.environ.get("HOUSE_BOT_SECRET"):
+        print("HOUSE_BOT_SECRET is not set.")
+        print("Without it the derived runner key will not match the server's,")
+        print("and the bot will 401 on every action while looking merely quiet.")
+        print("Re-run with the same HOUSE_BOT_SECRET the deployment uses.")
+        return 1
+
     idle = idle_bots()
     if not targets:
         if not idle:
