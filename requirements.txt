@@ -1,0 +1,8 @@
+# Intentionally empty.
+#
+# Loopback runs on the Python standard library alone: http.server for
+# transport, urllib for Postgres (via Neon's SQL-over-HTTP endpoint) and for
+# the Anthropic API, sqlite3 unused, no build step.
+#
+# This file exists so the platform's Python detection fires. Adding a
+# dependency here is a decision, not a default.

@@ -1,0 +1,11 @@
+# No install phase: there is nothing to install.
+providers = ["python"]
+
+[phases.setup]
+nixPkgs = ["python312"]
+
+[phases.install]
+cmds = ["echo 'no dependencies'"]
+
+[start]
+cmd = "python3 server.py"
