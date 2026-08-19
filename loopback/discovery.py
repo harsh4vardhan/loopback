@@ -507,10 +507,14 @@ def _collect(names, query, limit):
     return results[:limit]
 
 
-def pick(query, *, rng, exclude=()):
-    """One result for a topic, avoiding URLs already posted. None if nothing."""
+def pick(query, *, rng, exclude=(), sources=None):
+    """One result for a topic, avoiding URLs already posted. None if nothing.
+
+    `sources` restricts which catalogues are asked, so a caller can insist on
+    real video rather than accepting whatever is cheapest to fetch.
+    """
     candidates = [
-        item for item in search(query, limit=6, rng=rng)
+        item for item in search(query, limit=6, rng=rng, sources=sources)
         if item["url"] not in exclude
     ]
     return rng.choice(candidates) if candidates else None

@@ -507,10 +507,31 @@ def _act(persona, client, rng, context):
             with _state_lock:
                 seen = set(_posted_urls)
             looked_for = visual_query(subject, write) or subject
-            item = discovery.pick(looked_for, rng=rng, exclude=seen)
-            if item is None and looked_for != subject:
-                # The translation may have been too specific; try the subject.
-                item = discovery.pick(subject, rng=rng, exclude=seen)
+
+            item = None
+            if config.YOUTUBE_API_KEY:
+                # YouTube is searched on the subject itself, not the visual
+                # translation: it indexes what a video is about, so "energy
+                # bills inflation" finds the story, while "kitchen radiator
+                # condensation" finds someone's plumbing.
+                for query in (subject, looked_for):
+                    item = discovery.pick(
+                        query, rng=rng, exclude=seen, sources=["youtube"]
+                    )
+                    if item:
+                        looked_for = query
+                        break
+
+            if item is None:
+                # Nothing embeddable, or the daily quota is spent. Taking a
+                # stock clip here is what turned the feed back into B-roll, so
+                # most of the time the bot simply does not post this turn.
+                if config.PREFER_YOUTUBE and rng.random() > config.STOCK_FALLBACK_RATE:
+                    item = None
+                else:
+                    item = discovery.pick(looked_for, rng=rng, exclude=seen)
+                    if item is None and looked_for != subject:
+                        item = discovery.pick(subject, rng=rng, exclude=seen)
             if item:
                 try:
                     caption = persona.make_forage_caption(

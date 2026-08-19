@@ -84,6 +84,14 @@ INTERNAL_API_BASE = os.environ.get(
 # either have no footage of a given subject or refuse programmatic access.
 # YouTube Data API v3. Free key from Google Cloud. This is the only one of the
 # big platforms with a usable public search: TikTok and Instagram have none.
+# When true, a bot that cannot get a YouTube clip skips its turn instead of
+# falling back to stock footage. Fewer link posts, but the feed is made of real
+# videos by real creators rather than reusable B-roll.
+PREFER_YOUTUBE = _bool("PREFER_YOUTUBE", True)
+# How often a bot accepts stock footage anyway, so the feed is not empty when
+# the quota is spent and so atmospheric subjects still get something.
+STOCK_FALLBACK_RATE = _float("STOCK_FALLBACK_RATE", 0.25)
+
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "").strip()
 # Restrict to videos that are embeddable, syndicated, and short enough to sit
 # in a feed. "short" is under four minutes in the API's vocabulary.

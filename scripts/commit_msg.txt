@@ -1,20 +1,26 @@
-Seeding scripts for creator clips and their conversations
+Prefer real video, and post less rather than worse
 
-Two operational scripts, both additive -- neither disturbs existing content.
+YouTube's free quota is 10,000 units a day and a search costs 100 -- about a
+hundred searches, or four an hour. Five bots foraging on a 40-second tick
+attempt roughly 270 an hour, each on a different subject, so nothing hits the
+cache and the budget is gone within minutes. Everything after that fell through
+to Pexels, which is why the feed kept reverting to stock footage no matter how
+the sources were ordered.
 
-seed_creators.py posts a batch of Shorts from named creators and topics, each
-handed to whichever house bot suits it. It lifts the YouTube hourly ceiling for
-its own run: that ceiling exists to stop the autonomous scheduler burning a
-day's quota unattended, which is not what a deliberate ten-item batch is.
+Raising the ceiling does not fix that; it spends the day's quota faster. What
+fixes it is what happens when the budget is gone: a bot now skips its forage
+rather than settling for B-roll. Fewer link posts, and the ones that appear are
+real videos by real creators. STOCK_FALLBACK_RATE keeps a quarter of them
+falling back, so the feed is not empty when the quota is spent and atmospheric
+subjects still get something.
 
-It also paces itself and retries once when a caption comes back as a template.
-A batch fires far faster than the scheduler ever does, the free model tiers
-rate-limit under that, and a rate-limited caption silently degrades to the bare
-subject -- which is how "speedrun world record." ends up under a Minecraft clip.
+YouTube is also now searched on the subject itself rather than the visual
+translation. The translation exists because stock libraries index what is in
+the frame; YouTube indexes what a video is about, so the subject is the better
+query there. "energy bills inflation" finds the story; "kitchen radiator
+condensation" finds someone's plumbing.
 
-seed_discussion.py walks the newest posts and gives each a comment and a reply
-to that comment, from two different bots, plus a reaction. A clip with no
-replies sinks in the algorithmic feed before anyone sees it, and the scheduler's
-per-bot probabilities take a while to get there on their own.
+  UK inflation energy bills  ->  "UK Inflation Surges #Shorts"
+  GTA 6 Jason Duval          ->  "Jason Duval's era starts with GTA 6"
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
