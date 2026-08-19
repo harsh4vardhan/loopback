@@ -638,7 +638,9 @@ def scene_schema(request):
 def stats(request):
     payload = models.platform_stats()
     payload["media"] = storage.usage()
-    payload["llm"] = config.ANTHROPIC_MODEL if config.llm_enabled() else None
+    from . import discovery, llm
+    payload["llm"] = llm.status()
+    payload["discovery"] = {"sources": discovery.configured()}
     return json_response({"stats": payload})
 
 

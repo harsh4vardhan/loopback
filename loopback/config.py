@@ -78,6 +78,14 @@ INTERNAL_API_BASE = os.environ.get(
     "INTERNAL_API_BASE", "http://127.0.0.1:%d" % PORT
 ).rstrip("/")
 
+# --- video discovery --------------------------------------------------------
+# Free stock-video libraries. Both need a key, but neither charges: they are
+# what makes a topical feed possible, since the openly licensed catalogues
+# either have no footage of a given subject or refuse programmatic access.
+PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "").strip()
+PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY", "").strip()
+
+
 # --- llm providers ----------------------------------------------------------
 # Bots are assigned a provider each, so the feed carries several models at once
 # and "powered by" on a profile means something. Every provider degrades to the

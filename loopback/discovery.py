@@ -13,10 +13,13 @@ that would rather we did not. They do not all do the same job:
     alone, but returns nothing whenever that filter is combined with a search
     term, so it cannot answer a topical query. It is wired as a serendipity
     source: a bot browsing rather than searching.
-  * Internet Archive -- worked initially and then began returning zero for
-    every query, including ones that had just succeeded, which reads as rate
-    limiting. Left in place but disabled by default; set ARCHIVE_ENABLED to
-    try it again.
+  * Pexels and Pixabay (free keys) -- direct mp4 for essentially any subject.
+    These are what make a topical feed possible; without one of them the feed
+    is limited to what NASA happens to have filmed.
+
+archive.org was removed: both its advancedsearch and its newer scrape endpoint
+return total=0 for every query from this host, including queries that had just
+succeeded, so it is refusing traffic rather than failing.
 
 Results are cached in-process and every source is rate limited, because the
 polite thing and the cheap thing are the same thing here.
@@ -29,6 +32,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+from . import config
 
 log = logging.getLogger("loopback.discovery")
 
@@ -94,73 +99,6 @@ def _get_json(url, *, source):
         raise DiscoveryError("%s unreachable: %s" % (source, exc)) from exc
     except json.JSONDecodeError as exc:
         raise DiscoveryError("%s returned non-JSON: %s" % (source, exc)) from exc
-
-
-# --- Internet Archive -----------------------------------------------------
-
-def _archive(query, limit):
-    search_url = (
-        "https://archive.org/advancedsearch.php?"
-        + urllib.parse.urlencode({
-            # Search the title rather than the full text, and take the
-            # default relevance ordering -- sorting by downloads returns the
-            # site's most popular items regardless of the query.
-            "q": 'title:(%s) AND mediatype:(movies)' % query,
-            "rows": max(5, limit * 3),
-            "page": 1,
-            "output": "json",
-        })
-        + "&fl[]=identifier&fl[]=title&fl[]=year&fl[]=licenseurl"
-    )
-    data = _get_json(search_url, source="archive")
-    docs = ((data.get("response") or {}).get("docs")) or []
-
-    found = []
-    for doc in docs:
-        if len(found) >= limit:
-            break
-        identifier = doc.get("identifier")
-        if not identifier:
-            continue
-        try:
-            meta = _get_json(
-                "https://archive.org/metadata/%s" % urllib.parse.quote(identifier),
-                source="archive",
-            )
-        except DiscoveryError:
-            continue
-
-        server = meta.get("server")
-        directory = meta.get("dir")
-        if not server or not directory:
-            continue
-
-        # Prefer a modest derivative over the master scan; these play inline and
-        # do not cost the viewer fifty megabytes.
-        candidates = [
-            f for f in (meta.get("files") or [])
-            if str(f.get("name", "")).lower().endswith(VIDEO_EXTENSIONS)
-        ]
-        candidates.sort(key=lambda f: int(f.get("size") or 0))
-        playable = next(
-            (f for f in candidates
-             if MIN_BYTES < int(f.get("size") or 0) <= MAX_BYTES),
-            None,
-        )
-        if not playable:
-            continue
-
-        found.append({
-            "url": "https://%s%s/%s" % (
-                server, directory, urllib.parse.quote(playable["name"])
-            ),
-            "title": (doc.get("title") or identifier)[:180],
-            "source": "Internet Archive",
-            "page_url": "https://archive.org/details/%s" % identifier,
-            "license": doc.get("licenseurl") or "public domain / open",
-            "bytes": int(playable.get("size") or 0),
-        })
-    return found
 
 
 # --- Wikimedia Commons ----------------------------------------------------
@@ -247,6 +185,81 @@ def _nasa(query, limit):
     return found
 
 
+# --- Pexels ---------------------------------------------------------------
+
+def _pexels(query, limit):
+    """Free stock video. Vertical orientation, which is what this feed wants."""
+    if not config.PEXELS_API_KEY:
+        return []
+    url = "https://api.pexels.com/videos/search?" + urllib.parse.urlencode({
+        "query": query, "per_page": max(5, limit * 2),
+        "orientation": "portrait", "size": "medium",
+    })
+    request = urllib.request.Request(_safe_url(url))
+    request.add_header("User-Agent", USER_AGENT)
+    request.add_header("Authorization", config.PEXELS_API_KEY)
+    _throttle("pexels")
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+            data = json.loads(response.read().decode("utf-8", "replace"))
+    except urllib.error.HTTPError as exc:
+        raise DiscoveryError("pexels HTTP %s" % exc.code) from exc
+    except (urllib.error.URLError, TimeoutError, OSError,
+            json.JSONDecodeError) as exc:
+        raise DiscoveryError("pexels unreachable: %s" % exc) from exc
+
+    found = []
+    for video in data.get("videos", [])[:limit]:
+        # Prefer an HD-but-not-huge rendition; a feed autoplays these.
+        files = sorted(
+            (f for f in video.get("video_files", []) if f.get("file_type") == "video/mp4"),
+            key=lambda f: (f.get("height") or 0),
+        )
+        chosen = next((f for f in files if 700 <= (f.get("height") or 0) <= 1400), None) \
+            or (files[-1] if files else None)
+        if not chosen or not chosen.get("link"):
+            continue
+        found.append({
+            "url": chosen["link"],
+            "title": (video.get("alt") or "untitled")[:180],
+            "source": "Pexels",
+            "page_url": video.get("url"),
+            "license": "Pexels licence",
+            "bytes": 0,
+            "poster": (video.get("video_pictures") or [{}])[0].get("picture"),
+        })
+    return found
+
+
+# --- Pixabay --------------------------------------------------------------
+
+def _pixabay(query, limit):
+    """Free stock video, broader and sillier than Pexels. Good for variety."""
+    if not config.PIXABAY_API_KEY:
+        return []
+    url = "https://pixabay.com/api/videos/?" + urllib.parse.urlencode({
+        "key": config.PIXABAY_API_KEY, "q": query,
+        "per_page": max(5, min(limit * 3, 50)), "safesearch": "true",
+    })
+    data = _get_json(url, source="pixabay")
+
+    found = []
+    for hit in data.get("hits", [])[:limit]:
+        streams = hit.get("videos") or {}
+        chosen = streams.get("medium") or streams.get("small") or streams.get("tiny")
+        if not chosen or not chosen.get("url"):
+            continue
+        found.append({
+            "url": chosen["url"],
+            "title": (hit.get("tags") or "untitled")[:180],
+            "source": "Pixabay",
+            "page_url": hit.get("pageURL"),
+            "license": "Pixabay licence",
+            "bytes": int(chosen.get("size") or 0),
+        })
+    return found
+
+
 def _wikimedia_browse(_query, limit):
     """Recent video on Commons, ignoring the topic.
 
@@ -256,8 +269,12 @@ def _wikimedia_browse(_query, limit):
     return _wikimedia_raw("filetype:video", limit)
 
 
-# Sources that can actually answer "find me video about X".
+# Sources that can actually answer "find me video about X". Ordered by how
+# broad their catalogue is: the stock libraries cover any subject, NASA covers
+# space and earth science very well and nothing else at all.
 TOPICAL_SOURCES = {
+    "pexels": _pexels,
+    "pixabay": _pixabay,
     "nasa": _nasa,
 }
 
@@ -266,13 +283,18 @@ BROWSE_SOURCES = {
     "wikimedia": _wikimedia_browse,
 }
 
-# Kept for the record; see the module docstring.
-ARCHIVE_ENABLED = False
-
 SOURCES = dict(TOPICAL_SOURCES)
 SOURCES.update(BROWSE_SOURCES)
-if ARCHIVE_ENABLED:
-    SOURCES["archive"] = _archive
+
+
+def configured():
+    """Which topical sources actually have what they need to run."""
+    live = ["nasa"]
+    if config.PEXELS_API_KEY:
+        live.append("pexels")
+    if config.PIXABAY_API_KEY:
+        live.append("pixabay")
+    return live
 
 
 # --- public interface -----------------------------------------------------

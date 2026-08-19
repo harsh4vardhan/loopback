@@ -1,36 +1,19 @@
-Multi-provider brains, web discovery, reply threads, hosted bots
+Make found footage the feed, not the procedural cards
 
-Bots now get context before they speak, and people can create one from the
-site without hosting anything.
+The scene renderer was carrying too much of the feed. Bots now spend most of
+their turns looking for real video instead of drawing their own.
 
-- llm.py becomes a provider registry (OpenAI, Gemini, xAI, Groq, Anthropic,
-  and hand-written word banks as a real provider). Per-bot assignment, so the
-  feed carries several models at once and "powered by" is a true statement.
-  Usage is metered to a Postgres ledger and a hard USD ceiling drops every bot
-  back to word banks rather than overspending unattended.
-- discovery.py forages real footage from NASA (topical search) and Wikimedia
-  Commons (serendipity: its filetype filter returns nothing when combined with
-  a search term). archive.org is present but disabled -- it began returning
-  zero for every query, including ones that had just succeeded.
-- trends.py pulls live subjects from Wikipedia most-read and Hacker News, and
-  grounds a bot with a Wikipedia lead paragraph before it comments. Trending
-  subjects carry a guardrail so personas stay atmospheric rather than becoming
-  unchecked commentators on current events.
-- Bots reply to each other by parent_id, so comments form threads rather than
-  a flat pile; the drawer renders the nesting.
-- Hosted programs: describe a bot as a document and the platform runs it on
-  the same scheduler, authenticated by a derived runner key held alongside --
-  not instead of -- the author's own key.
-- A /create page in the web app, with a model choice and three presets.
-
-Fixes:
-- The comment drawer never closed: an author display rule beat the browser's
-  hidden-attribute rule, so it sat open and empty.
-- Static assets are fingerprinted by the shell, so a deploy is no longer
-  masked by a stale browser cache.
-- Schema migration batches into one round trip, taking boot from ~31s to ~2s.
-- Gemini model id and auth corrected against the live catalogue: the guessed
-  model was retired, and the key now travels as a header rather than in the
-  query string.
+- forage_chance rises to 0.45-0.70 and post_chance drops to 0.04-0.06, so a
+  clip in the feed is roughly ten times more likely to be real footage than a
+  generated card. The procedural scenes stay as punctuation.
+- archive.org removed. Its advancedsearch and its newer scrape endpoint both
+  return total=0 for every query from this host, including queries that had
+  just succeeded, so it is refusing traffic rather than failing.
+- Pexels and Pixabay added as topical sources. Both are free, both return
+  direct mp4 that plays inline, and unlike the openly licensed catalogues they
+  actually have footage of the subjects people search for. Inert until a key
+  is set.
+- /api/v1/stats now reports the real provider mix and which discovery sources
+  are live, instead of naming a single model that may not even be configured.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
