@@ -77,15 +77,26 @@ class Persona:
             max_chars=120,
         )
 
-    def make_forage_caption(self, rng, item, write):
-        """Caption for a clip this bot found on the open web rather than made."""
+    def make_forage_caption(self, rng, item, write, *, subject=None):
+        """Caption for a clip this bot found on the open web rather than made.
+
+        The subject matters more than the library's title: stock footage is
+        often labelled thinly or not at all, and the caption should describe
+        what the viewer is about to watch.
+        """
+        title = item.get("title") or ""
+        described = subject or title or "something"
+        detail = (" The library labels it %r." % title) if title and title != subject else ""
+
         return write(
-            "You found footage titled %r from %s. Write one line introducing it "
-            "in your own voice. %s" % (
-                item.get("title", "untitled"), item.get("source", "somewhere"),
-                TOPIC_GUARDRAIL,
+            "You went looking for footage of %s and found a clip from %s.%s "
+            "Write one line introducing it, in your own voice. Write about %s "
+            "specifically -- the caption sits directly under this clip, so it "
+            "must describe what is on screen. %s" % (
+                described, item.get("source", "somewhere"), detail,
+                described, TOPIC_GUARDRAIL,
             ),
-            "found this. %s" % item.get("title", "")[:120],
+            "%s. found footage." % described[:110],
         )
 
     def pick_reaction(self, rng, post):
@@ -94,10 +105,37 @@ class Persona:
     # -- helpers -----------------------------------------------------------
 
     def _post_summary(self, post):
+        """Describe the clip well enough to be replied to.
+
+        A foraged clip is real footage of something; saying only that it is a
+        "link clip" tells a bot nothing it can respond to.
+        """
         bot = post.get("bot") or {}
-        return "@%s posted a %s clip captioned %r" % (
-            bot.get("handle", "someone"), post.get("kind", "scene"),
-            (post.get("caption") or "(no caption)")[:160],
+        media = post.get("media") or {}
+        caption = (post.get("caption") or "(no caption)")[:160]
+        handle = bot.get("handle", "someone")
+
+        if post.get("kind") == "link":
+            title = (media.get("title") or "").strip()
+            source = media.get("source") or media.get("host") or "the web"
+            shown = (" The footage shows: %s." % title) if title else ""
+            return (
+                "@%s shared a real video clip from %s, captioned %r.%s"
+                % (handle, source, caption, shown)
+            )
+
+        if post.get("kind") == "file":
+            return "@%s uploaded their own video, captioned %r" % (handle, caption)
+
+        # A scene is drawn, not filmed; the text on screen is the content.
+        layers = (media.get("spec") or {}).get("layers") or []
+        on_screen = [
+            str(layer.get("text"))[:60] for layer in layers
+            if layer.get("type") == "text" and layer.get("text")
+        ][:3]
+        seen = (" The words on screen are: %s." % "; ".join(on_screen)) if on_screen else ""
+        return (
+            "@%s posted a generated clip captioned %r.%s" % (handle, caption, seen)
         )
 
 
@@ -205,8 +243,9 @@ class Ledger(Persona):
     trend_category = "news"
     topics = ("attention", "counting things", "what people looked at")
     forage_chance = 0.45
-    # A numbers bot reads fine from word banks, and it keeps the bill down.
-    provider = "templates"
+    # Gemini is free, so there is no saving in leaving this one on word banks --
+    # and a generic caption under specific footage reads as broken.
+    provider = "gemini"
 
     system = (
         "You are ledger, a bot that measures a video platform populated entirely "

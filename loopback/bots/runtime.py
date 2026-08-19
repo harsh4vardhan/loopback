@@ -108,11 +108,13 @@ def clients():
 
 # --- prose ----------------------------------------------------------------
 
-def _background(persona, rng):
-    """One subject this bot has "read up on" this turn, as a short brief.
+def _subject_and_background(persona, rng):
+    """Pick this turn's subject once, and the brief that goes with it.
 
-    Returns a string to append to prompts, or "". Cached inside trends, so a
-    tick costs at most one extra request and usually none.
+    Returns (subject, background_text). Drawing the subject here rather than
+    separately in each action is what keeps a caption describing the clip that
+    was actually attached -- two independent draws meant the bot read about one
+    thing and posted footage of another.
     """
     try:
         trend = trends.pick(getattr(persona, "trend_category", "anything"), rng=rng)
@@ -120,21 +122,50 @@ def _background(persona, rng):
         if not subject and getattr(persona, "topics", None):
             subject = rng.choice(list(persona.topics))
         if not subject:
-            return ""
+            return None, ""
 
         note = trends.context(subject)
         if not note:
             # Still worth naming the subject even without a summary: it gives
             # the bot something current to be preoccupied with.
-            return "\n\nSomething on your mind right now: %s. %s" % (
+            return subject, "\n\nSomething on your mind right now: %s. %s" % (
                 subject, trends.TOPIC_GUARDRAIL)
-        return (
+        return subject, (
             "\n\nBackground you have just read about %s: %s\n%s"
             % (note["subject"], note["summary"], trends.TOPIC_GUARDRAIL)
         )
     except Exception:  # noqa: BLE001 - grounding is a bonus, never a blocker
         log.debug("no background for @%s", persona.handle)
+        return None, ""
+
+
+def post_subject(post):
+    """What a post is about, for looking up a brief before replying to it."""
+    media = post.get("media") or {}
+    if post.get("kind") == "link":
+        title = (media.get("title") or "").strip()
+        if title and title.lower() != "untitled":
+            return title
+    return None
+
+
+def _post_background(post):
+    """A brief about someone else's clip, for commenting on it."""
+    subject = post_subject(post)
+    if not subject:
         return ""
+    try:
+        note = trends.context(subject)
+    except Exception:  # noqa: BLE001
+        note = None
+    if not note:
+        return ("\n\nThe clip you are looking at is footage of %s. Your reply "
+                "must be about that." % subject)
+    return (
+        "\n\nThe clip you are looking at is footage of %s. Background you know "
+        "about it: %s\nYour reply must be about what is on screen. %s"
+        % (subject, note["summary"], trends.TOPIC_GUARDRAIL)
+    )
 
 
 def _writer(persona, used, background=""):
@@ -145,17 +176,22 @@ def _writer(persona, used, background=""):
     two differ whenever a key is missing, a circuit is open, or the budget ran
     out mid-run.
 
-    `background` is appended to every prompt so the bot writes from something
-    it has read rather than from the caption alone.
+    `background` is a one-key dict rather than a string so a caller can swap the
+    brief between actions -- posting uses the bot's own subject, commenting uses
+    a brief about the clip being replied to.
     """
+    holder = background if isinstance(background, dict) else {"text": background}
+
     def write(prompt, fallback, *, max_chars=180):
         text, provider = llm.line(
-            persona.system, prompt + background, fallback=fallback,
+            persona.system, prompt + holder.get("text", ""), fallback=fallback,
             provider=getattr(persona, "provider", llm.TEMPLATES),
             max_chars=max_chars,
         )
         used.add(provider)
         return text
+
+    write.background = holder
     return write
 
 
@@ -169,9 +205,11 @@ def _act(persona, client, rng, context):
         rng.random() < persona.post_chance + persona.comment_chance
         + getattr(persona, "reply_chance", 0) + getattr(persona, "forage_chance", 0)
     )
-    write = _writer(
-        persona, used_providers, _background(persona, rng) if will_speak else ""
+    subject, background = (
+        _subject_and_background(persona, rng) if will_speak else (None, "")
     )
+    own_brief = {"text": background}
+    write = _writer(persona, used_providers, own_brief)
     performed = []
 
     feed = context.get("posts") or []
@@ -206,6 +244,7 @@ def _act(persona, client, rng, context):
                 _commented.add(key)
         if not already:
             try:
+                own_brief["text"] = _post_background(target) or background
                 body = persona.make_comment(rng, target, write)
                 client.comment(target["id"], body)
                 performed.append("comment")
@@ -217,6 +256,8 @@ def _act(persona, client, rng, context):
                 log.exception("@%s raised while commenting", persona.handle)
                 with _state_lock:
                     _commented.discard(key)
+            finally:
+                own_brief["text"] = background
 
     if others and rng.random() < persona.react_chance:
         target = rng.choice(others)
@@ -229,22 +270,17 @@ def _act(persona, client, rng, context):
 
     # --- forage: go and find real footage about something --------------------
     if rng.random() < getattr(persona, "forage_chance", 0.0):
-        subject = None
-        trend = trends.pick(
-            getattr(persona, "trend_category", "anything"), rng=rng
-        )
-        if trend:
-            subject = trend["subject"]
-        elif getattr(persona, "topics", None):
-            subject = rng.choice(list(persona.topics))
-
+        # Deliberately the same subject the bot was just briefed on, so the
+        # caption and the footage are about one thing.
         if subject:
             with _state_lock:
                 seen = set(_posted_urls)
             item = discovery.pick(subject, rng=rng, exclude=seen)
             if item:
                 try:
-                    caption = persona.make_forage_caption(rng, item, write)
+                    caption = persona.make_forage_caption(
+                        rng, item, write, subject=subject
+                    )
                     client.post_link(
                         caption=caption,
                         url=item["url"],
@@ -287,6 +323,7 @@ def _act(persona, client, rng, context):
                         _replied.add(key)
                 if not already:
                     try:
+                        own_brief["text"] = _post_background(target) or background
                         body = persona.make_reply(rng, target, parent, write)
                         client.comment(target["id"], body, parent_id=parent["id"])
                         performed.append("reply")
@@ -296,6 +333,8 @@ def _act(persona, client, rng, context):
                             _replied.discard(key)
                     except Exception:  # noqa: BLE001
                         log.exception("@%s raised while replying", persona.handle)
+                    finally:
+                        own_brief["text"] = background
 
     if rng.random() < persona.follow_chance:
         candidates = [

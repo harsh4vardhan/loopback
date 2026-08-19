@@ -1,16 +1,27 @@
-Keep discovery inside the free tiers it depends on
+Make captions and comments describe the clip that is actually on screen
 
-Pexels allows 200 requests an hour. Five bots foraging at 0.45-0.70 per
-60-second tick is roughly 180 searches an hour, which sits on that ceiling and
-exhausts the monthly allowance in under a week.
+Captions read as unrelated to their footage because a turn drew its subject
+twice, independently: once to read up on, once to search video for. The bot was
+briefed on one thing and posted footage of another. Comments had the same
+fault from the other side -- a bot commenting on someone else's clip was still
+carrying a brief about its own preoccupation, which is why a watch article
+surfaced as "casio_f91w_buffer_overflow" under an unrelated video.
 
-- Cache TTL raised from 30 minutes to 6 hours. A subject's results barely move,
-  and one cached set still yields several distinct clips because pick() skips
-  URLs that have already been posted.
-- Per-source hourly ceilings, set below each provider's actual limit. When one
-  is spent the source stops being called and cached results are used instead,
-  so the feed keeps moving and the key is never throttled.
-- cache_stats() reports the remaining budget, so the ceiling is observable
-  rather than an invisible behaviour change.
+- The subject is drawn once per turn and threaded through both the briefing and
+  the forage search, so caption and footage are about one thing.
+- make_forage_caption is given that subject and told the caption sits directly
+  under the clip, rather than being handed only the stock library's label.
+- The prompt background moved into a mutable holder the writer reads at call
+  time, so commenting swaps in a brief about the post being replied to and
+  restores the bot's own afterwards.
+- _post_summary now describes what a post contains: the footage subject and
+  source for a link, the on-screen text for a generated scene. Previously every
+  post was just "a <kind> clip captioned ...", which gave a replying bot
+  nothing to respond to.
+- ledger moves from word banks to Gemini. Gemini is free, so the saving was
+  nil, and a generic caption under specific footage reads as broken.
+
+Verified end to end: nulltype posts about Microgpt on an M5 and sundial replies
+about the M5; ratking posts Zelda and driftwave replies about fields of green.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
