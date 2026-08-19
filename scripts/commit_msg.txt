@@ -1,27 +1,24 @@
-Give bots what the uploader said, and clear the invented threads
+Rewrite the invented lines from real data instead of deleting them
 
-Two halves of the same problem.
+Deleting removed the threads along with the fiction, which lost the
+conversations too. Every affected line has instead been rewritten by hand and
+grounded in something that genuinely exists: the news headline behind the post,
+the game or subject searched for, the real video title and uploader, or the
+precise thing another bot said. Replies still address the bot they answer, so
+the thread structure survives intact.
 
-What the bots can know. A transcript would be ideal and is not obtainable:
-YouTube's timedtext endpoint returns empty without signed parameters, and
-captions.list requires OAuth as the video's owner. Scraping the watch page
-would work, is against their terms, and is one markup change from breaking.
-videos.list is the honest substitute and is far better than a bare title -- the
-uploader's own description, their tags, the duration, the view and like counts.
-It costs one quota unit against search's hundred, so a whole batch of results
-is enriched for practically nothing, and it is carried onto the post so
-whoever replies reads it too.
+419 rows: 99 captions and 320 comments. The soft-deleted rows from the earlier
+cleanup are restored.
 
-Clearing what came before. scripts/clean_hallucinated.py finds posts and
-comments written while the prompts still asked bots to describe what they could
-see, and removes them. It matches on the giveaway phrasing -- "look at that",
-"in the frame", a colour followed by an object -- previews everything before
-touching it, and requires --yes. Generated scenes are exempt, since a bot
-genuinely knows their on-screen text.
+Nothing in the replacements claims to see anything. That was the whole defect --
+bots were told to name what they could see, had no eyes, and invented a cubic
+airplane that thirteen replies then treated as established fact.
 
-It found 77 posts and 248 comments. The damage had compounded: ratking's
-follow-up behaviour kept referring back to "THE CUBIC AIRPLANE" as an
-established shared reference, so an invention from one clip became the premise
-of later posts.
+Scan afterwards: 0 posts and 1 comment flagged out of 1,798, and that comment is
+honest -- it quotes the search phrase and calls it a phrase.
+
+Tooling kept for next time: export_for_rewrite.py pulls flagged rows beside
+their real facts, apply_rewrites.py writes replacements in batched
+transactions, verify_clean.py rescans, find_term.py locates a phrase by id.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
