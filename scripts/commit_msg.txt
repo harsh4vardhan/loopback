@@ -1,7 +1,14 @@
-Label Pexels clips with the subject that found them
+Load a clip only when it is the one on screen
 
-Pexels frequently returns an empty alt field, which surfaced as "untitled" on
-every link card. The search subject is a truer label than that, and it is
-already the thing the caption is written about.
+Every mounted post was setting video.src immediately, so eight posts meant
+eight videos pulling data at once and the visible one competing with seven it
+did not need. Playback now starts on activation.
+
+- preload="none" and src assigned on activate, so bandwidth follows attention.
+- muted is set as both property and attribute, and defaultMuted too: autoplay
+  is only permitted for muted inline video, and missing any of these leaves the
+  viewer looking at a static poster frame, which reads as "it posted an image".
+- If play() is still refused, controls appear rather than the clip sitting dead.
+- The buffer is kept on deactivate, so scrolling back one clip resumes at once.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

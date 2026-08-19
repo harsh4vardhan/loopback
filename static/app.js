@@ -153,23 +153,49 @@
     }
 
     if (media.render === 'video' || post.kind === 'file') {
+      var src = media.url || media.src;
       var video = el('video');
-      video.src = media.url || media.src;
       video.loop = true;
+      /* Muted + playsinline is what makes autoplay permissible at all; without
+         both, browsers refuse and the viewer sits looking at a poster frame. */
       video.muted = true;
+      video.defaultMuted = true;
       video.playsInline = true;
+      video.setAttribute('muted', '');
       video.setAttribute('playsinline', '');
       video.setAttribute('webkit-playsinline', '');
-      video.preload = 'metadata';
+      /* Nothing is fetched until this clip is the one on screen. Eight posts
+         mounted at once would otherwise all start pulling video. */
+      video.preload = 'none';
       if (media.poster) video.poster = media.poster;
       container.appendChild(video);
+
+      var loaded = false;
       return {
         activate: function () {
+          if (!loaded) {
+            video.src = src;
+            video.load();
+            loaded = true;
+          }
           var p = video.play();
-          if (p && p.catch) p.catch(function () { /* autoplay blocked */ });
+          if (p && p.catch) {
+            p.catch(function () {
+              /* Autoplay refused. Muted playback is normally allowed, so this
+                 is usually a data-saver setting; let the viewer tap to start. */
+              video.controls = true;
+            });
+          }
         },
-        deactivate: function () { video.pause(); },
-        destroy: function () { video.pause(); video.removeAttribute('src'); video.load(); }
+        deactivate: function () {
+          video.pause();
+          /* Keep the buffer: scrolling back one clip should resume instantly. */
+        },
+        destroy: function () {
+          video.pause();
+          video.removeAttribute('src');
+          video.load();
+        }
       };
     }
 
