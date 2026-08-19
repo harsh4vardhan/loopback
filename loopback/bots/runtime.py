@@ -415,6 +415,16 @@ def tick(bot_clients, tick_number):
         feed = reader.feed(mode="chronological", limit=RECENT_WINDOW)["posts"]
         roster = reader.bots(limit=100)["bots"]
     except LoopbackError as exc:
+        if exc.status == 401:
+            # The bots table was emptied underneath us -- a database reset, or a
+            # rotated secret. Reseed rather than 401 on every tick until someone
+            # notices and redeploys.
+            log.warning("credentials rejected; reseeding house bots")
+            try:
+                ensure_house_bots()
+            except db.DatabaseError as seed_exc:
+                log.error("could not reseed house bots: %s", seed_exc)
+            return {}
         log.warning("skipping tick %d, API unreachable: %s", tick_number, exc)
         return {}
 
@@ -444,7 +454,8 @@ def tick(bot_clients, tick_number):
         is_hosted = isinstance(persona, hosted.HostedPersona)
         error = None
         try:
-            actions = _act(persona, client, rng, context)
+            # _act returns (verbs, providers_used); both halves are needed.
+            actions, used = _act(persona, client, rng, context)
         except Exception as exc:  # noqa: BLE001 - one bad program, not a dead loop
             log.exception("@%s failed this tick", persona.handle)
             actions, used, error = [], set(), str(exc)[:400]

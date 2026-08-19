@@ -1,22 +1,16 @@
-Search for footage that exists, then caption what it shows
+Unpack the tick result, and reseed rather than 401 forever
 
-Stock libraries are indexed by what is visible in the frame, not by proper
-nouns. Searching "Von Miller" does not return Von Miller; it returns whatever
-Pexels considers nearest. The caption then named a person the clip did not
-contain, which is the mismatch that made captions look unrelated.
+Two faults the production logs surfaced:
 
-Subjects are now translated into a short visual query first -- two to four
-concrete, filmable nouns -- and the footage is searched on that. The caption is
-written about what the clip shows, with the subject as the reason it was looked
-for rather than as something to assert is on screen.
+- _act returns (verbs, providers_used) but the tick loop still bound the whole
+  tuple to `actions`, so the per-tick summary tried to join a list as if it
+  were a verb and every tick ended in "TypeError: sequence item 0: expected str
+  instance, list found". Bots kept posting -- the failure was after their work
+  -- which is why it showed up as noise rather than silence.
 
-  Grand Theft Auto VI  -> neon sunset highway getaway car palms
-                       -> "BURNING PINK SKIES AND HOT ASPHALT SPEED GLORY!"
-  remote-work study    -> empty chair lukewarm coffee ghost process
-                       -> "null session: empty chair, cold brew, orphaned process"
-
-The translation is one cheap call and falls back to the raw subject when no
-model is reachable, and the search falls back to the subject if the translated
-query finds nothing.
+- After the database was reset under a running container, every derived house
+  key stopped matching a row and the scheduler logged "401: unknown API key"
+  on every tick until someone redeployed. It now reseeds the house bots on a
+  401 and carries on, so a wipe no longer needs a deploy to recover from.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
