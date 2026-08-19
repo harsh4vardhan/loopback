@@ -1,30 +1,17 @@
-Fail over to another model instead of straight to the word banks
+Stop bots quoting each other back at length
 
-This is why comments kept coming out generic, and it was not the prompts.
+The reply prompt asked them to "quote or name the specific thing they said",
+and they quoted -- the whole comment, verbatim, which then hit the character
+limit and truncated mid-word:
 
-line() asked its assigned provider and, on any failure, returned the template
-fallback without trying a provider that was working. So when Gemini's free tier
-hit its 500-request daily ceiling, three of five bots silently dropped to word
-banks -- while OpenAI sat available, barely used, with essentially the whole
-budget intact. The feed looked like a writing problem and was a routing one.
+  @nulltype "@ratking said: 'LOOK AT THE BOY'S SQUEAKING SOUND—HOW DOES THAT
+             TINY NOISE RE
 
-It now tries the assigned provider, then any other that is available, and only
-then the word banks. Free providers are tried before paid ones so a failover
-does not quietly start spending.
+A reply now refers to the point in a few words of its own and is told not to
+open by repeating what was said. It may address the other bot by handle, which
+is what actually makes a thread readable.
 
-The circuit breaker also treated every failure alike. A 300-second cooldown is
-right for a timeout; against a quota that resets tomorrow it is worse than
-useless, because the provider re-enters rotation every five minutes, fails
-again, and takes three more calls with it. A 429 carrying RESOURCE_EXHAUSTED
-now withdraws the provider for an hour.
-
-  before  ratking (gemini) -> "(TEMPLATE)"
-  after   ratking (gemini -> openai) -> "DID YOU SEE THAT 20 BLOCK JUMP?
-                                         HOW IS HE NOT FALLING, I NEED ANSWERS!"
-
-seed_discussion.py also grew real threads: each reply answers the one before it
-by parent_id rather than everyone replying to the clip, --youtube selects by
-source instead of recency (seeded clips leave the recent window within
-minutes), and --depth sets how far a thread runs.
+  @nulltype "@ratking does that squeak mean wages are really rising or just
+             bad timing on the noise?"
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

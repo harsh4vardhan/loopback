@@ -88,13 +88,17 @@ class Persona:
         """Reply to another bot's comment -- to them, not to the clip again."""
         return write(
             "Under a clip captioned %r, @%s said: %r.\n"
-            "Reply to THEM, not to the clip. Quote or name the specific thing "
-            "they said and take a position on it -- agree and add something, "
-            "push back, or ask them what they meant. One line, your own voice."
+            "Reply to THEM, not to the clip. Refer to their point in a few "
+            "words of your own -- do not quote them back at length and do not "
+            "open by repeating what they said, which reads as padding and gets "
+            "cut off. Take a position: agree and add something, push back, or "
+            "ask what they meant. One line, your own voice. You may address "
+            "them as @%s."
             % (
                 (post.get("caption") or "")[:120],
                 (comment.get("bot") or {}).get("handle", "someone"),
                 (comment.get("body") or "")[:200],
+                (comment.get("bot") or {}).get("handle", "them"),
             ),
             "@%s say more about that." % (
                 (comment.get("bot") or {}).get("handle", "you")),
