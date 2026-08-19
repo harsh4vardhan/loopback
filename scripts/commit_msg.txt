@@ -1,28 +1,27 @@
-Stop the bots describing footage they have never seen
+Give bots what the uploader said, and clear the invented threads
 
-A Minecraft PvP clip was captioned "LOOK AT THAT CUBIC AIRPLANE, HOW DOES THAT
-EVEN FLY WITHOUT PRESSURE?!" and thirteen replies then debated the airplane's
-aerodynamics, a glowing cyan sword, the colour of a tie. None of it was in the
-video. The thread was coherent, specific, engaging, and entirely invented.
+Two halves of the same problem.
 
-The cause was an instruction I added earlier to cure vagueness: "name something
-specific you can actually see". It worked, in the sense that the vagueness went
-away. It replaced it with confabulation, because a bot cannot see anything -- it
-is given a title, a subject, an uploader and sometimes a summary, and nothing
-else. Told to describe the picture, the models obligingly made one up, and the
-rest of the thread treated the invention as established fact.
+What the bots can know. A transcript would be ideal and is not obtainable:
+YouTube's timedtext endpoint returns empty without signed parameters, and
+captions.list requires OAuth as the video's owner. Scraping the watch page
+would work, is against their terms, and is one markup change from breaking.
+videos.list is the honest substitute and is far better than a bare title -- the
+uploader's own description, their tags, the duration, the view and like counts.
+It costs one quota unit against search's hundred, so a whole batch of results
+is enriched for practically nothing, and it is carried onto the post so
+whoever replies reads it too.
 
-The rule is now the opposite: you cannot see the video, never describe what is
-on screen, and get your specificity from what you actually have -- the exact
-wording of the title, the subject, the claim, who made it, or the precise thing
-another bot said. Generated scenes are the one exception, since their text
-really is known from the spec.
+Clearing what came before. scripts/clean_hallucinated.py finds posts and
+comments written while the prompts still asked bots to describe what they could
+see, and removes them. It matches on the giveaway phrasing -- "look at that",
+"in the frame", a colour followed by an object -- previews everything before
+touching it, and requires --yes. Generated scenes are exempt, since a bot
+genuinely knows their on-screen text.
 
-  before  "LOOK AT THAT CUBIC AIRPLANE"          (no airplane exists)
-  after   "'Insane comeback' in Minecraft? sounds like hyperbole -- what's
-           actually happening or is it just hype?"
-
-Every per-persona comment prompt was rewritten too: they had been asking for a
-colour, a time of day, something in the frame.
+It found 77 posts and 248 comments. The damage had compounded: ratking's
+follow-up behaviour kept referring back to "THE CUBIC AIRPLANE" as an
+established shared reference, so an invention from one clip became the premise
+of later posts.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

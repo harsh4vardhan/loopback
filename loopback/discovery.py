@@ -55,7 +55,10 @@ MIN_SECONDS_BETWEEN = 3.0  # per source
 # 100 searches daily. Four an hour leaves headroom and makes it impossible for a
 # loop to burn the day's allowance before anyone notices.
 HOURLY_BUDGET = {
-    "youtube": 4, "pexels": 120, "pixabay": 120, "nasa": 200, "wikimedia": 60,
+    # Search costs 100 units; the details lookup costs 1, so it gets its own
+    # generous ceiling rather than competing with searches for the same budget.
+    "youtube": 4, "youtube_details": 200,
+    "pexels": 120, "pixabay": 120, "nasa": 200, "wikimedia": 60,
 }
 _budget_lock = threading.Lock()
 _calls = {}  # source -> [window_start_monotonic, count]
@@ -266,6 +269,42 @@ def _is_short(video_id):
         return False
 
 
+def _youtube_details(video_ids):
+    """Descriptions, tags and counts for up to 50 videos, in one call.
+
+    A transcript is not obtainable for someone else's video without OAuth or
+    scraping, so this is the closest legitimate thing: what the uploader wrote
+    about it themselves. Costs 1 quota unit for the whole batch.
+    """
+    if not video_ids or not config.YOUTUBE_API_KEY:
+        return {}
+
+    url = "https://www.googleapis.com/youtube/v3/videos?" + urllib.parse.urlencode({
+        "key": config.YOUTUBE_API_KEY,
+        "id": ",".join(video_ids[:50]),
+        "part": "snippet,contentDetails,statistics",
+    })
+    try:
+        data = _get_json(url, source="youtube_details")
+    except DiscoveryError as exc:
+        log.debug("could not enrich youtube results: %s", exc)
+        return {}
+
+    details = {}
+    for item in data.get("items", []):
+        snippet = item.get("snippet") or {}
+        stats = item.get("statistics") or {}
+        description = " ".join((snippet.get("description") or "").split())
+        details[item.get("id")] = {
+            "description": description[:600],
+            "tags": [t for t in (snippet.get("tags") or [])][:8],
+            "duration": (item.get("contentDetails") or {}).get("duration", ""),
+            "views": int(stats.get("viewCount") or 0),
+            "likes": int(stats.get("likeCount") or 0),
+        }
+    return details
+
+
 def _youtube(query, limit):
     """Vertical footage of the actual subject, embedded rather than downloaded.
 
@@ -309,6 +348,7 @@ def _youtube(query, limit):
             # The Shorts URL, so links.normalise recognises the format and the
             # feed knows to let it fill the stage.
             "url": "https://www.youtube.com/shorts/%s" % video_id,
+            "video_id": video_id,
             "title": (snippet.get("title") or query)[:180],
             "source": "YouTube Shorts",
             "page_url": "https://www.youtube.com/shorts/%s" % video_id,
@@ -317,6 +357,12 @@ def _youtube(query, limit):
             "poster": poster,
             "channel": (snippet.get("channelTitle") or "")[:120],
         })
+
+    # One extra call for the whole batch: the uploader's own description and
+    # tags, which is the closest thing to knowing what is in the video.
+    details = _youtube_details([item["video_id"] for item in found])
+    for item in found:
+        item.update(details.get(item["video_id"], {}))
     return found
 
 

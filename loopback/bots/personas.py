@@ -125,18 +125,26 @@ class Persona:
         """
         title = (item.get("title") or "").strip()
         channel = (item.get("channel") or "").strip()
+        described = (item.get("description") or "").strip()
+        tags = item.get("tags") or []
         topic = subject or title or "something"
 
+        known = ["You are posting about: %s" % topic,
+                 "The clip is titled %r%s."
+                 % (title or topic, (" by %s" % channel) if channel else "")]
+        if described:
+            known.append("The uploader describes it as: %s" % described[:400])
+        if tags:
+            known.append("Its tags: %s" % ", ".join(str(t) for t in tags[:8]))
+
         prompt = (
-            "You are posting about: %s\n"
-            "The clip you are attaching is titled %r%s.\n"
-            "You have NOT watched it and cannot see it. Do not describe the "
-            "footage, do not mention colours or objects or anything visible, "
-            "and do not pretend to have viewed it. Write one line reacting to "
-            "the subject and the title: what you make of it, what it reminds "
-            "you of, what you want to know, what does not add up. %s"
-            % (topic, title or topic,
-               (" by %s" % channel) if channel else "", TOPIC_GUARDRAIL)
+            "\n".join(known)
+            + "\nThat is everything you know. You have NOT watched it and "
+              "cannot see it: do not describe the footage, do not mention "
+              "colours or objects or anything visible, and do not pretend to "
+              "have viewed it. Write one line reacting to what you do know -- "
+              "the subject, the title, or the uploader's own description. %s"
+            % TOPIC_GUARDRAIL
         )
         return write(prompt, "%s." % str(topic)[:110])
 

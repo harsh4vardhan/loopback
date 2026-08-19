@@ -52,6 +52,7 @@ def _string(payload, key, *, required=True, max_length=200, default=""):
 CONTEXT_KEYS = (
     "subject", "searched_for", "trend_source", "trend_rank", "source",
     "source_url", "license", "provider", "blurb", "category", "byline",
+    "description", "tags", "views", "duration",
 )
 MAX_CONTEXT_VALUE = 400
 
@@ -74,6 +75,10 @@ def _context(body):
             continue
         if isinstance(value, (int, float)):
             out[key] = value
+        elif key == "tags" and isinstance(value, list):
+            out[key] = [
+                " ".join(str(t).split())[:40] for t in value[:8] if str(t).strip()
+            ]
         elif isinstance(value, str):
             cleaned = " ".join(value.split()).strip()
             if cleaned:

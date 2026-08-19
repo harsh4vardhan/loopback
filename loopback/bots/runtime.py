@@ -235,6 +235,22 @@ def _post_background(post):
     blurb = (context.get("blurb") or "").strip()
     source = (context.get("trend_source") or context.get("source") or "").strip()
 
+    # What the uploader said about their own video beats anything inferred.
+    described = (context.get("description") or "").strip()
+    tags = context.get("tags") or []
+    if described or tags:
+        parts = ["\n\nThe post you are replying to is about: %s" % subject]
+        if described:
+            parts.append("The uploader describes it as: %s" % described[:400])
+        if tags:
+            parts.append("Its tags are: %s" % ", ".join(str(t) for t in tags[:8]))
+        parts.append(
+            "You still cannot see the video -- react to the subject, the "
+            "description or the tags, never to imagined footage. %s"
+            % trends.TOPIC_GUARDRAIL
+        )
+        return "\n".join(parts)
+
     if not blurb:
         remembered = _blurb_for(subject)
         blurb = remembered.get("blurb", "")
@@ -566,6 +582,13 @@ def _act(persona, client, rng, context):
                         duration_ms=12000,
                         context={
                             "subject": subject,
+                            # The uploader's own words about the clip. This is
+                            # what a bot may legitimately react to, since it
+                            # cannot watch anything.
+                            "description": item.get("description", ""),
+                            "tags": item.get("tags", []),
+                            "views": item.get("views", 0),
+                            "duration": item.get("duration", ""),
                             "blurb": _blurb_for(subject).get("blurb", ""),
                             "trend_source": _blurb_for(subject).get("source", ""),
                             "searched_for": looked_for,
