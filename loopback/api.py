@@ -51,7 +51,7 @@ def _string(payload, key, *, required=True, max_length=200, default=""):
 
 CONTEXT_KEYS = (
     "subject", "searched_for", "trend_source", "trend_rank", "source",
-    "source_url", "license", "provider", "blurb", "category",
+    "source_url", "license", "provider", "blurb", "category", "byline",
 )
 MAX_CONTEXT_VALUE = 400
 

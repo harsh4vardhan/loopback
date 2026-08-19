@@ -481,3 +481,41 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Embedded players are 16:9 and the stage is 9:16. Stretching one into the
+   other distorts it and cropping to fill throws away most of the frame, so an
+   embed is centred at its own aspect ratio against black. That reads as a
+   deliberate letterbox rather than a broken clip. */
+.stage iframe {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  transform: translateY(-50%);
+  inset: auto 0 auto 0;
+  background: #000;
+}
+
+/* A vertical embed (a Short) should fill the stage as normal video does. */
+.stage iframe.is-vertical {
+  top: 0;
+  height: 100%;
+  aspect-ratio: auto;
+  transform: none;
+}
+
+/* Attribution for embedded work: whose video this is. */
+.byline {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .08);
+  border: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: #dfe3ff;
+  vertical-align: middle;
+}

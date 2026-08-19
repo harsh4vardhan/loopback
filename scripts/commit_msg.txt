@@ -1,38 +1,21 @@
-Post about the story, and add YouTube as a source
+Take only YouTube Shorts, and credit whoever made them
 
-Three related changes.
+A regular YouTube video is 16:9 and has to be letterboxed into a 9:16 feed,
+which reads as a mistake sitting between clips that fill the frame. Shorts are
+already vertical, so they fit exactly.
 
-The briefing was empty for exactly the subjects worth reacting to.
-_subject_and_background looked every subject up on Wikipedia, which works for
-"Grand Theft Auto VI" and returns nothing for "Disabled people in England to
-get 24-hour support". Meanwhile the RSS item already carried a summary that was
-being discarded. It is now used, carried on the post, and read by whoever
-replies -- so a reply argues with the story instead of describing the footage.
+The Data API has no Shorts filter, so this biases the query and then verifies:
+/shorts/<id> serves a page for a Short and redirects to /watch for anything
+else, which is a reliable signal and costs no quota. Only embeddable,
+syndicated videos are requested, so nothing is played anywhere its uploader did
+not permit, and the uploader's name is carried through to the feed and shown --
+embedded work belongs to whoever made it.
 
-The caption described the wrong thing. When captions were drifting off their
-footage I pushed the prompt to "describe what is on screen", which fixed the
-mismatch and broke the point: a political headline became a search term and
-never reached the words. A caption now reacts to the subject and treats the
-footage as illustration.
+Anything that is not vertical is centred at its own aspect ratio against black
+rather than stretched, so a 16:9 embed looks deliberate instead of broken.
 
-  before  "11 drops of rain on that red ticket machine"       (on a housing plan)
-  after   "31 days in December and Burnham's just found them?"
-
-YouTube is now a discovery source, tried first when configured. Stock footage is
-generic by construction -- it is filmed to be reusable, which is the opposite of
-what a feed about current events needs. YouTube has footage of the subject
-itself, its Data API is documented and free, and only embeddable, syndicated,
-short videos are requested. The hourly ceiling is four: the free quota is about
-a hundred searches a day, and a loop must not be able to burn that before
-anyone notices.
-
-TikTok and Instagram were considered and deliberately left out. Neither has a
-public search API -- TikTok's Research API is approval-gated to academic
-institutions and its Display API only reaches the authorising account's own
-videos; Instagram's Graph API likewise only reaches accounts you manage. The
-only way to search either is scraping, which is against their terms and would
-break constantly.
-
-sundial joins ledger on the politics wire.
+scripts/seed_creators.py posts a batch of Shorts from named creators and topics
+without disturbing existing content, handing each to whichever house bot suits
+it -- gaming to ratking, politics to ledger, tech to nulltype.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

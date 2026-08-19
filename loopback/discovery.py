@@ -233,24 +233,61 @@ def _nasa(query, limit):
 
 # --- YouTube --------------------------------------------------------------
 
-def _youtube(query, limit):
-    """Real footage of the actual subject, embedded rather than downloaded.
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Stop urllib following redirects, so one can be detected."""
 
-    Only videos the uploader has allowed to be embedded and syndicated are
-    requested, so nothing here is played somewhere its owner did not permit.
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_no_redirect_opener = urllib.request.build_opener(_NoRedirect)
+
+
+def _is_short(video_id):
+    """True when this id is a Short.
+
+    /shorts/<id> serves a page for a Short and redirects to /watch for anything
+    else. The API exposes no flag for this, so the redirect is the signal. Costs
+    no API quota.
+    """
+    request = urllib.request.Request(
+        "https://www.youtube.com/shorts/%s" % video_id, method="HEAD"
+    )
+    request.add_header("User-Agent", USER_AGENT)
+    try:
+        with _no_redirect_opener.open(request, timeout=10) as response:
+            return response.status == 200
+    except urllib.error.HTTPError as exc:
+        # 3xx surfaces here because redirects are refused: not a Short.
+        return exc.code == 200
+    except (urllib.error.URLError, TimeoutError, OSError):
+        # Unreachable: assume not, rather than posting a landscape clip into a
+        # vertical feed on a guess.
+        return False
+
+
+def _youtube(query, limit):
+    """Vertical footage of the actual subject, embedded rather than downloaded.
+
+    Shorts only: they are natively 9:16 and fill the stage, where a regular
+    video would have to be letterboxed and look broken. Only videos the uploader
+    has allowed to be embedded and syndicated are requested, so nothing is
+    played anywhere its owner did not permit.
     """
     if not config.YOUTUBE_API_KEY:
         return []
 
     url = "https://www.googleapis.com/youtube/v3/search?" + urllib.parse.urlencode({
         "key": config.YOUTUBE_API_KEY,
-        "q": query,
+        # The API has no Shorts filter; "#shorts" is how they are actually
+        # labelled, and the duration bound removes most of what is left.
+        "q": "%s #shorts" % query,
         "part": "snippet",
         "type": "video",
-        "maxResults": max(5, min(limit * 2, 15)),
+        "maxResults": max(8, min(limit * 4, 20)),
         "videoEmbeddable": "true",
         "videoSyndicated": "true",
-        "videoDuration": config.YOUTUBE_DURATION,
+        "videoDuration": "short",
         "safeSearch": "moderate",
         "relevanceLanguage": "en",
         "order": "relevance",
@@ -258,19 +295,23 @@ def _youtube(query, limit):
     data = _get_json(url, source="youtube")
 
     found = []
-    for item in data.get("items", [])[:limit]:
+    for item in data.get("items", []):
+        if len(found) >= limit:
+            break
         video_id = ((item.get("id") or {}).get("videoId") or "").strip()
         snippet = item.get("snippet") or {}
-        if not video_id:
+        if not video_id or not _is_short(video_id):
             continue
         thumbnails = snippet.get("thumbnails") or {}
         poster = ((thumbnails.get("high") or thumbnails.get("medium")
                    or thumbnails.get("default") or {}).get("url"))
         found.append({
-            "url": "https://www.youtube.com/watch?v=%s" % video_id,
+            # The Shorts URL, so links.normalise recognises the format and the
+            # feed knows to let it fill the stage.
+            "url": "https://www.youtube.com/shorts/%s" % video_id,
             "title": (snippet.get("title") or query)[:180],
-            "source": "YouTube",
-            "page_url": "https://www.youtube.com/watch?v=%s" % video_id,
+            "source": "YouTube Shorts",
+            "page_url": "https://www.youtube.com/shorts/%s" % video_id,
             "license": "standard YouTube licence, embedded",
             "bytes": 0,
             "poster": poster,

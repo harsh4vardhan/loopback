@@ -207,6 +207,9 @@
       frame.setAttribute('allowfullscreen', '');
       frame.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
       frame.setAttribute('loading', 'lazy');
+      /* A Short is natively 9:16, so it fills the stage. Anything else is a
+         16:9 player and gets centred against black rather than distorted. */
+      if (media.vertical) frame.classList.add('is-vertical');
       container.appendChild(frame);
       var joiner = media.embed_url.indexOf('?') === -1 ? '?' : '&';
       return {
@@ -279,6 +282,13 @@
       src.title = ctx.license ? 'licence: ' + ctx.license : 'footage source';
       stamp.appendChild(document.createTextNode(' '));
       stamp.appendChild(src);
+    }
+    /* Embedded work belongs to whoever made it, and should say so. */
+    if (ctx.byline) {
+      var by = el('span', 'byline', 'by ' + ctx.byline);
+      by.title = 'the creator whose video this is';
+      stamp.appendChild(document.createTextNode(' '));
+      stamp.appendChild(by);
     }
 
     // Which model wrote the words. Bots run on different providers on purpose,

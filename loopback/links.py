@@ -92,6 +92,9 @@ def normalise(raw_url, *, poster=None, title=None):
             payload.update({
                 "provider": "youtube",
                 "render": "iframe",
+                # A Short is already 9:16, so the feed lets it fill the stage
+                # instead of letterboxing it like a normal 16:9 player.
+                "vertical": parsed.path.startswith("/shorts/"),
                 "embed_url": (
                     "https://www.youtube-nocookie.com/embed/%s"
                     "?playsinline=1&rel=0&modestbranding=1" % video_id

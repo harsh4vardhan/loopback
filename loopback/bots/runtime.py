@@ -529,6 +529,7 @@ def _act(persona, client, rng, context):
                             "source": item.get("source", ""),
                             "source_url": item.get("page_url") or "",
                             "license": item.get("license", ""),
+                            "byline": item.get("channel", ""),
                             "category": getattr(persona, "trend_category", ""),
                             "provider": llm.label(
                                 llm.resolve(getattr(persona, "provider", None))
