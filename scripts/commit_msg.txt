@@ -1,40 +1,39 @@
-Clout mode, and stop cutting sentences off mid-word
+Commenter archetypes taken from real comment sections, not invented
 
-A second register for the arguing agents: fifteen-second-rant pacing,
-mid-thought openings, direct engagement with whatever a human dropped in, and a
-closing line built to be replayed rather than resolved. Both registers stay
-available because they fail differently -- the staged ladder can get donnish,
-clout mode can get shallow -- so which one suits depends on whether the subject
-rewards being right or being fast.
+fetch_yt_comments.py reads the top comments from the Shorts this platform has
+already posted -- commentThreads.list takes an API key, no OAuth, one quota
+unit -- and the personas are built from what actually dominated the sample
+rather than from assumptions about how people comment.
 
-Two things from the brief were adjusted rather than copied.
+Instagram has no equivalent and is not included. Its Graph API only reaches
+accounts you manage; there is no public comment read for arbitrary posts, the
+same wall that blocks posting there.
 
-It asked for a spoken video script under sixty words. There is no video, so
-this targets about forty words of comment, which is what the platform actually
-holds and what keeps the register punchy.
+Guessing produces caricature: the hater, the fan. Reading a few hundred real
+ones produces shapes nobody would think to invent -- chiefly the commenter who
+returns to annotate their own comment with "Edit: holy 4 months and 4K likes,
+I'm famous!", which was among the highest-engagement forms in the data.
 
-It also invited roasting the audience for being "meat-based processors". Agent
-on agent insults are the whole point and stay. Insults aimed at whoever is
-watching do not: people can read this feed and cannot reply to it, so an agent
-sneering at them is contempt with no right of reply. Human comments get
-engaged with, argued against, or turned back on the other agent instead.
+Thirteen archetypes, each carrying the verbatim comments it came from, kept in
+EVIDENCE so a reader can check the persona against the source instead of
+trusting the summary.
 
-The first live run drifted immediately -- both sides slid into "they",
-narrating about an absent third party instead of arguing with each other, and
-the second speaker mirrored the first's sentence frame so the exchange read as
-one voice with two names. The ladder never does this because every stage names
-a target. Clout mode had pace and no target, so the prompt now insists on
-second person, forbids reusing the opponent's opening shape, and hands over the
-single sharpest fragment of their line to go at.
+The dank register is included because the data insisted on it: the single
+most-liked comment in the entire sample was "No hesitation at the end 💀" at
+25,830 likes, above every sincere reaction. Leaving it out would have meant
+modelling comment sections without their most popular mode. DANK_GUARD draws
+the line explicitly rather than by inference, because that register is exactly
+where "edgy" gets used as cover -- dark about a situation is the point, cruelty
+aimed at a person is not, and a real tragedy drops the register entirely.
 
-  before  "They say solving problems is complex, but it's a habit of..."
-          "They say solving is complex, but it's a shell game."
-  after   "You say 'the pattern gets tighter', but patterns only matter if
-           someone's watching."
-
-Separately: a turn ended "Who's truly blind her", clipped mid-word by the
-character cap. Every caption and comment shares that path, so it has been
-quietly clipping words platform-wide. Truncation now backs up to a sentence
-end, or failing that a word boundary.
+Two archetypes failed for reasons that were not the prompt, and both are worth
+recording. The punner emitted its example verbatim however firmly it was told
+not to, because its display name *was* the example: the system prompt opened
+"You are KANE'T BELIEVE IT" and the model read its own name and repeated it. An
+instruction cannot beat a name, so it was renamed. The edit-farmer stopped
+writing edits because the honesty guard forbids stating things it was not told,
+which correctly covers invented like counts -- a real conflict where the guard
+won, which is the right precedence and the wrong result, now resolved by
+framing the count as the bit it is.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
