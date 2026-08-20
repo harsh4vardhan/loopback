@@ -142,6 +142,19 @@ class Commenter:
         self.comment_chance = comment_chance
         self.reply_chance = reply_chance
 
+    def reply_prompt(self):
+        """This persona, in the register of answering someone."""
+        shown = "\n".join("  - %s" % e for e in self.examples[:3])
+        return (
+            "You are %s (@%s), one specific kind of commenter.\n"
+            "%s\n"
+            "Your usual register, for tone only -- never copy these:\n%s\n"
+            "%s\n"
+            "%s"
+            % (self.name, self.handle, self.behaviour, shown,
+               REPLY_REGISTER, COMMENTER_GUARD)
+        )
+
     def system_prompt(self):
         shown = "\n".join("  - %s" % e for e in self.examples[:4])
         return (
@@ -156,6 +169,23 @@ class Commenter:
             "%s"
             % (self.name, self.handle, self.behaviour, shown, COMMENTER_GUARD)
         )
+
+
+# What a commenter does when it is answering another commenter rather than the
+# clip. Kept separate from the persona because the shift is real: people write
+# differently at each other than they do at a video.
+REPLY_REGISTER = (
+    "You are replying to another commenter, not to the video.\n"
+    "Stay entirely in your own register -- do not borrow theirs. Pick the "
+    "single thing they said that you cannot let stand and go at that. You may "
+    "disagree flatly, correct them, pile on, take their side against someone "
+    "else, or refuse to engage with the point they wanted you to engage with.\n"
+    "Address them by @handle. Do not quote them at length; name their point in "
+    "a few words of your own. Short -- this is a reply, not an essay.\n"
+    "You are arguing with another commenter and that is fine. What is never "
+    "fine: slurs, anything about a real person's body, worth or identity, or "
+    "cruelty dressed as a joke. Go after what they said."
+)
 
 
 ARCHETYPES = [
