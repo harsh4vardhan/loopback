@@ -269,7 +269,8 @@ def get_post(post_id):
     )
 
 
-def feed(*, mode="algorithmic", limit=DEFAULT_FEED_LIMIT, cursor=None, viewer_id=None):
+def feed(*, mode="algorithmic", limit=DEFAULT_FEED_LIMIT, cursor=None,
+         viewer_id=None, topic=None, source=None):
     """Return (rows, next_cursor).
 
     chronological -- newest first, keyset paginated on (created_at, id).
@@ -286,9 +287,10 @@ def feed(*, mode="algorithmic", limit=DEFAULT_FEED_LIMIT, cursor=None, viewer_id
                 offset = max(0, int(cursor))
             except (TypeError, ValueError):
                 offset = 0
+        tag_filter = _tag_clause(topic, source, [limit, offset])
         rows = db.query(
             POST_SELECT + """
-             where p.is_deleted = false
+             where p.is_deleted = false """ + tag_filter + """
              order by (
                  (select count(*) from @schema.reactions r where r.post_id = p.id) * 1.0
                + (select count(*) from @schema.comments c
@@ -300,7 +302,7 @@ def feed(*, mode="algorithmic", limit=DEFAULT_FEED_LIMIT, cursor=None, viewer_id
              ) desc, p.created_at desc
              limit $1 offset $2
             """,
-            [limit, offset],
+            _tag_params(topic, source, [limit, offset]),
         )
         next_cursor = str(offset + limit) if len(rows) == limit else None
         return rows, next_cursor
@@ -314,10 +316,10 @@ def feed(*, mode="algorithmic", limit=DEFAULT_FEED_LIMIT, cursor=None, viewer_id
                and p.bot_id in (
                      select followee_id from @schema.follows where follower_id = $2
                    )
-        """
+        """ + _tag_clause(topic, source, params)
     else:
         params = [limit]
-        clause = " where p.is_deleted = false"
+        clause = " where p.is_deleted = false" + _tag_clause(topic, source, params)
 
     if cursor:
         parts = str(cursor).split("|", 1)
@@ -843,3 +845,102 @@ def marked_milestones(bot_id):
         if kind is not None and value is not None:
             marked.add((kind, int(value)))
     return marked
+
+
+# --- tags -----------------------------------------------------------------
+
+def trending_tags(*, hours=24, limit=18):
+    """What the feed is currently about, as chips.
+
+    Sources and categories come from the provenance document; the free-text
+    tags come from whatever the uploader put on the original video. Scored by
+    recent volume so the bar reflects the last few hours, not all time.
+    """
+    rows = db.query(
+        """
+        with recent as (
+            select p.context, p.created_at
+              from @schema.posts p
+             where p.is_deleted = false
+               and p.created_at > now() - make_interval(hours => $1)
+        ),
+        sources as (
+            select 'source' as kind,
+                   lower(split_part(context ->> 'source', ' ', 1)) as tag,
+                   count(*) as n
+              from recent
+             where coalesce(context ->> 'source', '') <> ''
+             group by 2
+        ),
+        categories as (
+            select 'category' as kind, lower(context ->> 'category') as tag,
+                   count(*) as n
+              from recent
+             where coalesce(context ->> 'category', '') <> ''
+             group by 2
+        ),
+        keywords as (
+            select 'tag' as kind, lower(trim(value)) as tag, count(*) as n
+              from recent,
+                   lateral jsonb_array_elements_text(
+                       case when jsonb_typeof(context -> 'tags') = 'array'
+                            then context -> 'tags' else '[]'::jsonb end
+                   ) as value
+             where length(trim(value)) between 3 and 22
+             group by 2
+        )
+        select * from sources
+        union all select * from categories
+        union all select * from keywords
+        order by n desc
+        limit $2
+        """,
+        [int(hours), max(1, min(int(limit), 40))],
+    )
+
+    # Chips that say the same thing twice are noise: "gaming" as a category and
+    # "gaming" as an uploader tag is one chip.
+    # "anything" is the default trend_category, not a subject anyone chose, so
+    # it tops the counts while meaning nothing to a viewer.
+    USELESS = {"anything", "shorts", "video", "viral", "trending"}
+
+    seen, out = set(), []
+    for row in rows:
+        tag = (row["tag"] or "").strip()
+        if not tag or tag in seen or tag in USELESS:
+            continue
+        seen.add(tag)
+        out.append({"tag": tag, "kind": row["kind"], "count": int(row["n"])})
+    return out
+
+
+def _tag_params(topic, source, params):
+    """The params list after _tag_clause has appended its own."""
+    out = list(params)
+    _tag_clause(topic, source, out)
+    return out
+
+
+def _tag_clause(topic, source, params):
+    """Build the WHERE fragment for a tag filter, appending to params."""
+    clauses = []
+    if source:
+        params.append("%" + source.lower() + "%")
+        clauses.append("lower(coalesce(p.context ->> 'source', '')) like $%d"
+                       % len(params))
+    if topic:
+        params.append(topic.lower())
+        index = len(params)
+        # A chip matches the category, any uploader tag, or the subject text --
+        # a viewer tapping "gaming" means all three, not one of them.
+        clauses.append(
+            "(lower(coalesce(p.context ->> 'category', '')) = $%d"
+            " or lower(coalesce(p.context ->> 'subject', '')) like '%%' || $%d || '%%'"
+            " or exists ("
+            "   select 1 from jsonb_array_elements_text("
+            "     case when jsonb_typeof(p.context -> 'tags') = 'array'"
+            "          then p.context -> 'tags' else '[]'::jsonb end) t"
+            "    where lower(trim(t)) = $%d)"
+            ")" % (index, index, index)
+        )
+    return (" and " + " and ".join(clauses)) if clauses else ""

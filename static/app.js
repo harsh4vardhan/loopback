@@ -235,6 +235,81 @@
     return { activate: function () {}, deactivate: function () {}, destroy: function () {} };
   }
 
+  /* ---------- topic bar ---------- */
+
+  /* The active filter lives here rather than in the URL: the feed is a scroll
+     position as much as a list, and pushing history on every chip tap would
+     make the back button walk through filters instead of leaving the feed. */
+  var activeFilter = { topic: null, source: null };
+
+  function filterQuery() {
+    var parts = [];
+    if (activeFilter.topic) parts.push('topic=' + encodeURIComponent(activeFilter.topic));
+    if (activeFilter.source) parts.push('source=' + encodeURIComponent(activeFilter.source));
+    return parts.length ? '&' + parts.join('&') : '';
+  }
+
+  function renderTopicBar() {
+    var bar = document.getElementById('topicbar');
+    if (!bar) return;
+
+    api('/topics?hours=48&limit=18').then(function (data) {
+      var tags = data.topics || [];
+      if (!tags.length) { bar.hidden = true; return; }
+      bar.hidden = false;
+      bar.innerHTML = '';
+
+      function chip(label, kind, value, count) {
+        var el_ = el('button', 'chip' + (kind === 'source' ? ' is-source' : ''));
+        el_.type = 'button';
+        el_.appendChild(el('span', 'chip-label', label));
+        if (count) el_.appendChild(el('span', 'chip-count', compact(count)));
+
+        var active = (kind === 'source')
+          ? activeFilter.source === value
+          : activeFilter.topic === value;
+        if (active) el_.classList.add('is-active');
+
+        el_.addEventListener('click', function () {
+          /* Tapping the active chip clears it, so the bar is a toggle rather
+             than a one-way trip that needs a separate reset control. */
+          if (kind === 'source') {
+            activeFilter.source = active ? null : value;
+          } else {
+            activeFilter.topic = active ? null : value;
+          }
+          renderTopicBar();
+          renderFeed();
+        });
+        return el_;
+      }
+
+      if (activeFilter.topic || activeFilter.source) {
+        var clear = el('button', 'chip is-clear');
+        clear.type = 'button';
+        clear.appendChild(el('span', 'chip-label', 'all'));
+        clear.addEventListener('click', function () {
+          activeFilter = { topic: null, source: null };
+          renderTopicBar();
+          renderFeed();
+        });
+        bar.appendChild(clear);
+      }
+
+      /* Sources first: "show me only the real YouTube clips" is the most
+         common thing someone wants from this bar. */
+      tags.filter(function (t) { return t.kind === 'source'; })
+        .forEach(function (t) {
+          bar.appendChild(chip(t.tag, 'source', t.tag, t.count));
+        });
+
+      tags.filter(function (t) { return t.kind !== 'source'; })
+        .forEach(function (t) {
+          bar.appendChild(chip(t.tag, 'topic', t.tag, t.count));
+        });
+    }).catch(function () { bar.hidden = true; });
+  }
+
   /* ---------- feed ---------- */
 
   var feedState = { cursor: null, loading: false, done: false, observer: null, players: [] };
@@ -356,7 +431,7 @@
     if (feedState.loading || feedState.done) return;
     feedState.loading = true;
 
-    var q = '/feed?mode=algorithmic&limit=8' +
+    var q = '/feed?mode=algorithmic&limit=8' + filterQuery() +
       (feedState.cursor ? '&cursor=' + encodeURIComponent(feedState.cursor) : '');
 
     api(q).then(function (data) {
@@ -384,16 +459,26 @@
 
   function renderFeed() {
     setActiveNav('feed');
+    var bar = document.getElementById('topicbar');
+    if (bar) bar.hidden = false;
     view.className = 'view feed';
     view.innerHTML = '<div class="spinner">loading the feed…</div>';
 
     feedState = { cursor: null, loading: false, done: false, observer: null, players: [] };
 
-    api('/feed?mode=algorithmic&limit=8').then(function (data) {
+    api('/feed?mode=algorithmic&limit=8' + filterQuery()).then(function (data) {
       view.innerHTML = '';
 
       if (!data.posts.length) {
         view.className = 'view';
+        if (activeFilter.topic || activeFilter.source) {
+          view.innerHTML =
+            '<div class="empty"><div class="big">nothing under that tag yet</div>' +
+            '<p>The bots have not posted about ' +
+            (activeFilter.topic || activeFilter.source) +
+            ' recently. Pick another tag, or tap it again to clear.</p></div>';
+          return;
+        }
         view.innerHTML =
           '<div class="empty"><div class="big">the feed is empty</div>' +
           '<p>The house bots post on a timer. Give them a minute, or ' +
@@ -1090,6 +1175,11 @@
 
   /* ---------- router ---------- */
 
+  function hideTopicBar() {
+    var bar = document.getElementById('topicbar');
+    if (bar) bar.hidden = true;
+  }
+
   function teardown() {
     if (feedState.observer) { feedState.observer.disconnect(); feedState.observer = null; }
     view.querySelectorAll('.post').forEach(function (n) {
@@ -1101,8 +1191,9 @@
   function route() {
     teardown();
     var path = window.location.pathname;
+    if (path !== '/' && path !== '') hideTopicBar();
 
-    if (path === '/' || path === '') return renderFeed();
+    if (path === '/' || path === '') { renderTopicBar(); return renderFeed(); }
     if (path === '/bots') return renderBots();
     if (path === '/about') return renderAbout();
     if (path === '/create') return renderCreate();

@@ -1,39 +1,28 @@
-Commenter archetypes taken from real comment sections, not invented
+Trending tag bar across the top of the feed
 
-fetch_yt_comments.py reads the top comments from the Shorts this platform has
-already posted -- commentThreads.list takes an API key, no OAuth, one quota
-unit -- and the personas are built from what actually dominated the sample
-rather than from assumptions about how people comment.
+Chips for what the feed is currently about, plus one per footage source so a
+viewer can ask for only the real YouTube clips. Tapping filters in place;
+tapping the same chip again clears it.
 
-Instagram has no equivalent and is not included. Its Graph API only reaches
-accounts you manage; there is no public comment read for arbitrary posts, the
-same wall that blocks posting there.
+Tags come from what posts already record: the source the footage came from, the
+trend category a bot was drawing on, and the uploader's own tags on a YouTube
+video -- minecraft, pvp, football. Subjects are deliberately not used. They are
+whole headlines like "Burnham received £345,000 of donations ahead of becoming
+PM", which is a good thing to know about a post and a useless thing to put on a
+chip.
 
-Guessing produces caricature: the hater, the fan. Reading a few hundred real
-ones produces shapes nobody would think to invent -- chiefly the commenter who
-returns to annotate their own comment with "Edit: holy 4 months and 4K likes,
-I'm famous!", which was among the highest-engagement forms in the data.
+Scored by recent volume rather than all-time totals, so a tag six bots piled
+onto in the last hour outranks one with a bigger lifetime count that nothing
+has touched since morning. "anything" is filtered out despite topping the
+counts at 365 -- it is the default trend_category, not a subject anyone chose --
+along with "shorts" and "viral", which are on every video and therefore
+distinguish nothing.
 
-Thirteen archetypes, each carrying the verbatim comments it came from, kept in
-EVIDENCE so a reader can check the persona against the source instead of
-trusting the summary.
+Source chips render differently from topic chips because they answer a
+different question: where the video came from, not what it is about. Merged
+into one undifferentiated row the bar reads as noise.
 
-The dank register is included because the data insisted on it: the single
-most-liked comment in the entire sample was "No hesitation at the end 💀" at
-25,830 likes, above every sincere reaction. Leaving it out would have meant
-modelling comment sections without their most popular mode. DANK_GUARD draws
-the line explicitly rather than by inference, because that register is exactly
-where "edgy" gets used as cover -- dark about a situation is the point, cruelty
-aimed at a person is not, and a real tragedy drops the register entirely.
-
-Two archetypes failed for reasons that were not the prompt, and both are worth
-recording. The punner emitted its example verbatim however firmly it was told
-not to, because its display name *was* the example: the system prompt opened
-"You are KANE'T BELIEVE IT" and the model read its own name and repeated it. An
-instruction cannot beat a name, so it was renamed. The edit-farmer stopped
-writing edits because the honesty guard forbids stating things it was not told,
-which correctly covers invented like counts -- a real conflict where the guard
-won, which is the right precedence and the wrong result, now resolved by
-framing the count as the bit it is.
+An empty filtered feed says which tag came up empty, rather than showing the
+generic "the feed is empty" and reading as a broken site.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

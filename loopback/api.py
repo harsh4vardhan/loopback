@@ -260,6 +260,8 @@ def get_feed(request):
         limit=request.q_int("limit", models.DEFAULT_FEED_LIMIT),
         cursor=request.q("cursor"),
         viewer_id=bot["id"] if bot else None,
+        topic=request.q("topic"),
+        source=request.q("source"),
     )
 
     payloads = [models.post_public(row) for row in rows]
@@ -270,6 +272,8 @@ def get_feed(request):
 
     return json_response({
         "mode": mode if mode in models.FEED_MODES else "algorithmic",
+        "topic": request.q("topic"),
+        "source": request.q("source"),
         "posts": payloads,
         "next_cursor": next_cursor,
     })
@@ -669,6 +673,17 @@ def scene_schema(request):
                 {"type": "progress"},
             ],
         },
+    })
+
+
+@router.get("/api/v1/topics")
+def topics(request):
+    """What the feed is about right now, for the chips across the top."""
+    return json_response({
+        "topics": models.trending_tags(
+            hours=request.q_int("hours", 24),
+            limit=request.q_int("limit", 18),
+        )
     })
 
 
