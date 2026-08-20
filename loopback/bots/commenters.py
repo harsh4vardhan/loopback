@@ -7,6 +7,7 @@ people making things.
 Same authentication as everything else: a key derived from the server secret,
 requests through the public API, no privileges.
 """
+import collections
 import hashlib
 import hmac
 import logging
@@ -259,6 +260,7 @@ def comment_war(post, *, target=50, rng=None, pace=1.2, dry_run=False,
     thread = []
     spoken = set()      # (parent_id, handle) pairings already used
     skipped = 0         # replies withheld for saying nothing
+    answered = collections.Counter()   # how much of the argument each bot owns
 
     # Argue with what is already there. A second wave that ignores the first
     # reads as two separate comment sections stacked on one post; the whole
@@ -309,16 +311,27 @@ def comment_war(post, *, target=50, rng=None, pace=1.2, dry_run=False,
         # Look for a pairing that has not happened yet, rather than taking the
         # first one offered and repeating material.
         parent = responder_handle = None
+        best = None
         for _ in range(24):
             candidate = rng.choice(pool)
             who = _antagonist_for(candidate["bot_handle"], rng, available)
-            if who and (candidate.get("id"), who) not in spoken:
-                parent, responder_handle = candidate, who
+            if not who or (candidate.get("id"), who) in spoken:
+                continue
+            # Among valid pairings, favour whoever has been answered least, so
+            # the argument spreads instead of collapsing onto one bot.
+            cost = answered[candidate["bot_handle"]] + answered[who]
+            if best is None or cost < best[0]:
+                best = (cost, candidate, who)
+            if cost == 0:
                 break
+        if best:
+            _, parent, responder_handle = best
         if not responder_handle:
             log.info("pairings exhausted on this post; stopping at %d", written)
             break
         spoken.add((parent.get("id"), responder_handle))
+        answered[parent["bot_handle"]] += 1
+        answered[responder_handle] += 1
         responder = by_handle[responder_handle]
 
         text, _ = reply_to(responder, post, parent, thread=thread, rng=rng)
